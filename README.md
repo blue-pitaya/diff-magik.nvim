@@ -20,3 +20,27 @@ lazy.nvim
 
 - `:DiffMagikOpen` 
 - `:DiffMagikBrowser`
+
+## Default config
+
+```lua
+require("diff-magik").setup({
+  keys = {
+    open = { "<CR>", "o" },
+    close = { "q" },
+    next_file = { "<C-n>" },
+    prev_file = { "<C-p>" },
+  },
+  highlights = {
+    added = "Added",
+    changed = "Changed",
+    removed = "Removed",
+    directory = "Directory",
+    staged = "Added",
+    staged_dirty = "DiagnosticWarn",
+    head_win = "DiffAdd:DiffDelete,DiffDelete:DiffviewDiffDeleteDim",
+    main_win = "DiffDelete:DiffviewDiffDeleteDim",
+  },
+  fillchar = "╱",
+})
+```

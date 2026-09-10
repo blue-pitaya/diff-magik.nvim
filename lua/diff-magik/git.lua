@@ -43,14 +43,39 @@ function Git:head_lines(rel)
 	return run({ "-C", self.root, "show", ("HEAD:%s"):format(rel) })
 end
 
----@param line string
----@return { status: string, path: string }
-local function parse_name_status(line)
-	local status, path = line:match("^(%S+)\t(.*)$")
-	return { status = status and status:sub(1, 1) or "M", path = path or line }
+---@class GitEntry
+---@field status string status against HEAD
+---@field path string
+---@field staged boolean the index differs from HEAD
+---@field unstaged boolean the working tree differs from the index
+
+---@param lines string[]|nil
+---@return table<string, boolean>
+local function path_set(lines)
+	local set = {}
+	for _, path in ipairs(lines or {}) do
+		set[path] = true
+	end
+	return set
 end
 
----@return { status: string, path: string }[]|nil
+---@param line string
+---@param staged table<string, boolean>
+---@param unstaged table<string, boolean>
+---@return GitEntry
+local function parse_name_status(line, staged, unstaged)
+	local status, path = line:match("^(%S+)\t(.*)$")
+	path = path or line
+
+	return {
+		status = status and status:sub(1, 1) or "M",
+		path = path,
+		staged = staged[path] or false,
+		unstaged = unstaged[path] or false,
+	}
+end
+
+---@return GitEntry[]|nil
 function Git:get_changed_files()
 	local tracked = run({
 		"-C",
@@ -67,6 +92,25 @@ function Git:get_changed_files()
 
 	local untracked = run({ "-C", self.root, "ls-files", "--others", "--exclude-standard" }) or {}
 
+	local staged = path_set(run({
+		"-C",
+		self.root,
+		"diff",
+		"--ignore-submodules",
+		"--no-renames",
+		"--cached",
+		"--name-only",
+		"HEAD",
+	}))
+	local unstaged = path_set(run({
+		"-C",
+		self.root,
+		"diff",
+		"--ignore-submodules",
+		"--no-renames",
+		"--name-only",
+	}))
+
 	local entries = {}
 	local seen = {}
 
@@ -78,10 +122,10 @@ function Git:get_changed_files()
 	end
 
 	for _, line in ipairs(tracked) do
-		add(parse_name_status(line))
+		add(parse_name_status(line, staged, unstaged))
 	end
 	for _, path in ipairs(untracked) do
-		add({ status = "A", path = path })
+		add({ status = "A", path = path, staged = false, unstaged = true })
 	end
 	return entries
 end

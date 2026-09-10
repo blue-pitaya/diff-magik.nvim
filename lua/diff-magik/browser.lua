@@ -1,6 +1,7 @@
 local Git = require("diff-magik.git")
 local TreeNode = require("diff-magik.tree")
 local DiffSplit = require("diff-magik.diffsplit")
+local config = require("diff-magik.config")
 
 local ns = vim.api.nvim_create_namespace("diff-magik")
 
@@ -17,21 +18,51 @@ local ns = vim.api.nvim_create_namespace("diff-magik")
 local Browser = {}
 Browser.__index = Browser
 
-local NEXT_KEY = "<C-n>"
-local PREV_KEY = "<C-p>"
-
 function Browser.new()
 	return setmetatable({ diffsplit = DiffSplit.new(), diff_bufs = {} }, Browser)
 end
 
+---@param bufnr integer
+---@param keys string[]
+---@param fn fun()
+---@param desc string
+local function map(bufnr, keys, fn, desc)
+	for _, key in ipairs(keys) do
+		vim.keymap.set("n", key, fn, { buffer = bufnr, nowait = true, silent = true, desc = desc })
+	end
+end
+
+---@param bufnr integer
+---@param keys string[]
+local function unmap(bufnr, keys)
+	for _, key in ipairs(keys) do
+		pcall(vim.keymap.del, "n", key, { buffer = bufnr })
+	end
+end
+
 ---@param status string
 local function status_hl(status)
+	local hl = config.options.highlights
 	if status == "A" then
-		return "Added"
+		return hl.added
 	elseif status == "D" then
-		return "Removed"
+		return hl.removed
 	end
-	return "Changed"
+	return hl.changed
+end
+
+---@param entry GitEntry
+local function stage_suffix(entry)
+	if not entry.staged then
+		return ""
+	end
+	return entry.unstaged and " (S*)" or " (S)"
+end
+
+---@param entry GitEntry
+local function stage_hl(entry)
+	local hl = config.options.highlights
+	return entry.unstaged and hl.staged_dirty or hl.staged
 end
 
 function Browser:render_tree()
@@ -46,7 +77,10 @@ function Browser:render_tree()
 			local marker = item.node.expanded and "▾" or "▸"
 			table.insert(lines, ("%s%s %s/"):format(indent, marker, item.node.name))
 		else
-			table.insert(lines, ("%s%s %s"):format(indent, item.node.entry.status, item.node.name))
+			table.insert(
+				lines,
+				("%s%s %s%s"):format(indent, item.node.entry.status, item.node.name, stage_suffix(item.node.entry))
+			)
 		end
 	end
 
@@ -57,22 +91,35 @@ function Browser:render_tree()
 	vim.api.nvim_buf_clear_namespace(self.sidebar_buf, ns, 0, -1)
 	for i, item in ipairs(flat) do
 		if item.node.is_dir then
-			vim.api.nvim_buf_set_extmark(self.sidebar_buf, ns, i - 1, 0, { line_hl_group = "Directory" })
+			vim.api.nvim_buf_set_extmark(self.sidebar_buf, ns, i - 1, 0, {
+				line_hl_group = config.options.highlights.directory,
+			})
 		else
 			local col = #("  "):rep(item.depth)
 			vim.api.nvim_buf_set_extmark(self.sidebar_buf, ns, i - 1, col, {
 				end_col = col + 1,
 				hl_group = status_hl(item.node.entry.status),
 			})
+
+			local suffix = stage_suffix(item.node.entry)
+			if suffix ~= "" then
+				local end_col = #lines[i]
+				vim.api.nvim_buf_set_extmark(self.sidebar_buf, ns, i - 1, end_col - #suffix + 1, {
+					end_col = end_col,
+					hl_group = stage_hl(item.node.entry),
+				})
+			end
 		end
 	end
 end
 
 function Browser:clear_diff_keymaps()
+	local keys = config.options.keys
+
 	for _, buf in ipairs(self.diff_bufs) do
 		if vim.api.nvim_buf_is_valid(buf) then
-			pcall(vim.keymap.del, "n", NEXT_KEY, { buffer = buf })
-			pcall(vim.keymap.del, "n", PREV_KEY, { buffer = buf })
+			unmap(buf, keys.next_file)
+			unmap(buf, keys.prev_file)
 		end
 	end
 	self.diff_bufs = {}
@@ -82,13 +129,14 @@ end
 function Browser:set_diff_keymaps(bufs)
 	self:clear_diff_keymaps()
 
+	local keys = config.options.keys
 	for _, buf in ipairs(bufs) do
-		vim.keymap.set("n", NEXT_KEY, function()
+		map(buf, keys.next_file, function()
 			self:select_offset(1)
-		end, { buffer = buf, nowait = true, silent = true, desc = "DiffMagik: next changed file" })
-		vim.keymap.set("n", PREV_KEY, function()
+		end, "DiffMagik: next changed file")
+		map(buf, keys.prev_file, function()
 			self:select_offset(-1)
-		end, { buffer = buf, nowait = true, silent = true, desc = "DiffMagik: previous changed file" })
+		end, "DiffMagik: previous changed file")
 	end
 
 	self.diff_bufs = bufs
@@ -127,7 +175,7 @@ function Browser:select_offset(offset)
 	end
 end
 
----@param entry { status: string, path: string }
+---@param entry GitEntry
 function Browser:open_entry(entry)
 	if not vim.api.nvim_win_is_valid(self.main_win) then
 		vim.notify("DiffMagik: target window is no longer open", vim.log.levels.ERROR)
@@ -225,15 +273,13 @@ function Browser:open()
 
 	self:render_tree()
 
-	vim.keymap.set("n", "<CR>", function()
+	local keys = config.options.keys
+	map(self.sidebar_buf, keys.open, function()
 		self:open_selected()
-	end, { buffer = self.sidebar_buf, nowait = true, silent = true })
-	vim.keymap.set("n", "o", function()
-		self:open_selected()
-	end, { buffer = self.sidebar_buf, nowait = true, silent = true })
-	vim.keymap.set("n", "q", function()
+	end, "DiffMagik: open entry")
+	map(self.sidebar_buf, keys.close, function()
 		self:close()
-	end, { buffer = self.sidebar_buf, nowait = true, silent = true })
+	end, "DiffMagik: close browser")
 end
 
 return Browser

@@ -1,3 +1,5 @@
+local config = require("diff-magik.config")
+
 ---@class DiffSplit
 ---@field head_win integer|nil the window id of the currently open HEAD-side split
 ---@field main_state { win: integer, fillchars: string, winhighlight: string }|nil
@@ -7,9 +9,6 @@ DiffSplit.__index = DiffSplit
 function DiffSplit.new()
 	return setmetatable({}, DiffSplit)
 end
-
-local HEAD_WINHL = "DiffAdd:DiffDelete,DiffDelete:DiffviewDiffDeleteDim"
-local MAIN_WINHL = "DiffDelete:DiffviewDiffDeleteDim"
 
 ---@param winid integer
 ---@param char string
@@ -89,15 +88,16 @@ function DiffSplit:open_against_head(repo, rel)
 	vim.bo[head_buf].bufhidden = "wipe"
 	vim.bo[head_buf].swapfile = false
 	vim.bo[head_buf].filetype = vim.bo[bufnr].filetype
+	vim.bo[head_buf].modifiable = false
 
 	vim.api.nvim_win_set_buf(self.head_win, head_buf)
-	set_diff_fillchar(self.head_win, "╱")
-	vim.wo[self.head_win].winhighlight = HEAD_WINHL
+	set_diff_fillchar(self.head_win, config.options.fillchar)
+	vim.wo[self.head_win].winhighlight = config.options.highlights.head_win
 	vim.cmd.diffthis()
 
 	vim.api.nvim_set_current_win(main_win)
-	set_diff_fillchar(main_win, "╱")
-	vim.wo[main_win].winhighlight = MAIN_WINHL
+	set_diff_fillchar(main_win, config.options.fillchar)
+	vim.wo[main_win].winhighlight = config.options.highlights.main_win
 	vim.cmd.diffthis()
 end
 

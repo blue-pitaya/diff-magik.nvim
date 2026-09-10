@@ -4,7 +4,7 @@
 ---@field expanded boolean|nil only set on directory nodes
 ---@field children TreeNode[]|nil only set on directory nodes
 ---@field dirs_by_name table<string, TreeNode>|nil only set on directory nodes
----@field entry { status: string, path: string }|nil only set on file nodes
+---@field entry GitEntry|nil only set on file nodes
 local TreeNode = {}
 TreeNode.__index = TreeNode
 
@@ -12,7 +12,7 @@ TreeNode.__index = TreeNode
 ---@field node TreeNode
 ---@field depth integer
 
----@param entries { status: string, path: string }[]
+---@param entries GitEntry[]
 function TreeNode.new(entries)
 	local root = setmetatable({ name = "", is_dir = true, expanded = true, children = {}, dirs_by_name = {} }, TreeNode)
 

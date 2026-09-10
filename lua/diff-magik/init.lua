@@ -1,12 +1,13 @@
 local Git = require("diff-magik.git")
 local DiffSplit = require("diff-magik.diffsplit")
 local Browser = require("diff-magik.browser")
+local config = require("diff-magik.config")
 
 local M = {}
 
----@param opts table|nil reserved for future configuration
+---@param opts table|nil partial `DiffMagikConfig`
 function M.setup(opts)
-	opts = opts or {}
+	config.setup(opts)
 
 	local browser = Browser.new()
 	local diffsplit = DiffSplit.new()
