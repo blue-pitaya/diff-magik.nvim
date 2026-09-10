@@ -12,11 +12,16 @@ local ns = vim.api.nvim_create_namespace("diff-magik")
 ---@field repo Git|nil
 ---@field tree TreeNode|nil
 ---@field flat TreeFlatItem[]|nil
+---@field current_path string|nil
+---@field diff_bufs integer[]
 local Browser = {}
 Browser.__index = Browser
 
+local NEXT_KEY = "<C-n>"
+local PREV_KEY = "<C-p>"
+
 function Browser.new()
-	return setmetatable({ diffsplit = DiffSplit.new() }, Browser)
+	return setmetatable({ diffsplit = DiffSplit.new(), diff_bufs = {} }, Browser)
 end
 
 ---@param status string
@@ -63,6 +68,65 @@ function Browser:render_tree()
 	end
 end
 
+function Browser:clear_diff_keymaps()
+	for _, buf in ipairs(self.diff_bufs) do
+		if vim.api.nvim_buf_is_valid(buf) then
+			pcall(vim.keymap.del, "n", NEXT_KEY, { buffer = buf })
+			pcall(vim.keymap.del, "n", PREV_KEY, { buffer = buf })
+		end
+	end
+	self.diff_bufs = {}
+end
+
+---@param bufs integer[]
+function Browser:set_diff_keymaps(bufs)
+	self:clear_diff_keymaps()
+
+	for _, buf in ipairs(bufs) do
+		vim.keymap.set("n", NEXT_KEY, function()
+			self:select_offset(1)
+		end, { buffer = buf, nowait = true, silent = true, desc = "DiffMagik: next changed file" })
+		vim.keymap.set("n", PREV_KEY, function()
+			self:select_offset(-1)
+		end, { buffer = buf, nowait = true, silent = true, desc = "DiffMagik: previous changed file" })
+	end
+
+	self.diff_bufs = bufs
+end
+
+---@return integer|nil
+function Browser:current_index()
+	if not self.flat or not self.current_path then
+		return nil
+	end
+
+	for i, item in ipairs(self.flat) do
+		if not item.node.is_dir and item.node.entry.path == self.current_path then
+			return i
+		end
+	end
+end
+
+---@param offset integer
+function Browser:select_offset(offset)
+	local index = self:current_index()
+	if not index then
+		return
+	end
+
+	local i = index + offset
+	while self.flat[i] do
+		if not self.flat[i].node.is_dir then
+			if self.sidebar_win and vim.api.nvim_win_is_valid(self.sidebar_win) then
+				vim.api.nvim_win_set_cursor(self.sidebar_win, { i, 0 })
+			end
+			self:open_entry(self.flat[i].node.entry)
+			return
+		end
+		i = i + offset
+	end
+end
+
 ---@param entry { status: string, path: string }
 function Browser:open_entry(entry)
 	if not vim.api.nvim_win_is_valid(self.main_win) then
@@ -73,6 +137,14 @@ function Browser:open_entry(entry)
 	vim.api.nvim_set_current_win(self.main_win)
 	vim.cmd.edit({ args = { vim.fs.joinpath(self.repo.root, entry.path) } })
 	self.diffsplit:open_against_head(self.repo, entry.path)
+	self.current_path = entry.path
+
+	local bufs = { vim.api.nvim_win_get_buf(self.main_win) }
+	local head_win = self.diffsplit.head_win
+	if head_win and vim.api.nvim_win_is_valid(head_win) then
+		table.insert(bufs, vim.api.nvim_win_get_buf(head_win))
+	end
+	self:set_diff_keymaps(bufs)
 end
 
 function Browser:open_selected()
@@ -92,6 +164,8 @@ function Browser:open_selected()
 end
 
 function Browser:close()
+	self:clear_diff_keymaps()
+
 	if self.sidebar_win and vim.api.nvim_win_is_valid(self.sidebar_win) then
 		vim.api.nvim_win_close(self.sidebar_win, true)
 	end
