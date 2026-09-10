@@ -25,7 +25,7 @@ end
 
 ---@param status string
 local function status_hl(status)
-	if status == "A" or status == "?" then
+	if status == "A" then
 		return "diffAdded"
 	elseif status == "D" then
 		return "diffRemoved"

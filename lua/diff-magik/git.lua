@@ -11,7 +11,11 @@ local function run(args)
 	if result.code ~= 0 then
 		return nil
 	end
-	return vim.split(result.stdout, "\n", { trimempty = true })
+	local lines = vim.split(result.stdout, "\n")
+	if lines[#lines] == "" then
+		table.remove(lines)
+	end
+	return lines
 end
 
 ---@param dir string
@@ -25,8 +29,8 @@ function Git.new(dir)
 end
 
 ---@param rel string path to the file, relative to `self.root`
-function Git:is_tracked(rel)
-	return run({ "-C", self.root, "ls-files", "--error-unmatch", "--", rel }) ~= nil
+function Git:exists_in_head(rel)
+	return run({ "-C", self.root, "cat-file", "-e", ("HEAD:%s"):format(rel) }) ~= nil
 end
 
 ---@param rel string
@@ -42,21 +46,21 @@ end
 ---@param line string
 ---@return { status: string, path: string }
 local function parse_name_status(line)
-	local status, rest = line:match("^(%S+)\t(.*)$")
-	status = status and status:sub(1, 1) or "?"
-
-	if status == "R" or status == "C" then
-		-- rename/copy lines are "STATUS\told\tnew"
-		local _, new_path = rest:match("^(.*)\t(.*)$")
-		return { status = status, path = new_path or rest }
-	end
-
-	return { status = status, path = rest }
+	local status, path = line:match("^(%S+)\t(.*)$")
+	return { status = status and status:sub(1, 1) or "M", path = path or line }
 end
 
 ---@return { status: string, path: string }[]|nil
 function Git:get_changed_files()
-	local tracked = run({ "-C", self.root, "diff", "--ignore-submodules", "--name-status", "HEAD" })
+	local tracked = run({
+		"-C",
+		self.root,
+		"diff",
+		"--ignore-submodules",
+		"--no-renames",
+		"--name-status",
+		"HEAD",
+	})
 	if not tracked then
 		return nil
 	end
@@ -64,11 +68,20 @@ function Git:get_changed_files()
 	local untracked = run({ "-C", self.root, "ls-files", "--others", "--exclude-standard" }) or {}
 
 	local entries = {}
+	local seen = {}
+
+	local function add(entry)
+		if not seen[entry.path] then
+			seen[entry.path] = true
+			table.insert(entries, entry)
+		end
+	end
+
 	for _, line in ipairs(tracked) do
-		table.insert(entries, parse_name_status(line))
+		add(parse_name_status(line))
 	end
 	for _, path in ipairs(untracked) do
-		table.insert(entries, { status = "?", path = path })
+		add({ status = "A", path = path })
 	end
 	return entries
 end

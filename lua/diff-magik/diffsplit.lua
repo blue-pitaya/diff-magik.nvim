@@ -1,5 +1,6 @@
 ---@class DiffSplit
 ---@field head_win integer|nil the window id of the currently open HEAD-side split
+---@field main_state { win: integer, fillchars: string, winhighlight: string }|nil
 local DiffSplit = {}
 DiffSplit.__index = DiffSplit
 
@@ -7,35 +8,89 @@ function DiffSplit.new()
 	return setmetatable({}, DiffSplit)
 end
 
+---@param name string
+local function hl_is_defined(name)
+	return not vim.tbl_isempty(vim.api.nvim_get_hl(0, { name = name, create = false }))
+end
+
+function DiffSplit.setup_highlights()
+	local dim = hl_is_defined("DiffviewDiffDeleteDim") and "DiffviewDiffDeleteDim" or "Comment"
+	vim.api.nvim_set_hl(0, "DiffMagikDiffDelete", { link = dim, default = true })
+
+	local delete = vim.api.nvim_get_hl(0, { name = "DiffDelete", link = false })
+	vim.api.nvim_set_hl(0, "DiffMagikDiffAddAsDelete", {
+		fg = delete.fg,
+		bg = delete.bg,
+		ctermfg = delete.ctermfg,
+		ctermbg = delete.ctermbg,
+	})
+end
+
+---@param winid integer
+---@param char string
+local function set_diff_fillchar(winid, char)
+	local parts = vim.tbl_filter(function(part)
+		return not vim.startswith(part, "diff:")
+	end, vim.split(vim.wo[winid].fillchars, ",", { trimempty = true }))
+
+	table.insert(parts, "diff:" .. char)
+	vim.wo[winid].fillchars = table.concat(parts, ",")
+end
+
+---@param winid integer
+function DiffSplit:save_main_state(winid)
+	self.main_state = {
+		win = winid,
+		fillchars = vim.api.nvim_get_option_value("fillchars", { scope = "local", win = winid }),
+		winhighlight = vim.wo[winid].winhighlight,
+	}
+end
+
+function DiffSplit:restore_main_state()
+	local state = self.main_state
+	self.main_state = nil
+
+	if not state or not vim.api.nvim_win_is_valid(state.win) then
+		return
+	end
+
+	vim.api.nvim_set_option_value("fillchars", state.fillchars, { scope = "local", win = state.win })
+	vim.wo[state.win].winhighlight = state.winhighlight
+end
+
 ---@param repo Git
 ---@param rel string path to the file, relative to `repo.root`
 function DiffSplit:open_against_head(repo, rel)
+	local main_win = vim.api.nvim_get_current_win()
 	local bufnr = vim.api.nvim_get_current_buf()
 
-	if not repo:is_tracked(rel) then
-		vim.notify(("DiffMagik: '%s' is not tracked in git"):format(rel), vim.log.levels.ERROR)
-		return
-	end
+	local head_content = {}
 
-	local changed = repo:diff_name_only(rel)
-	if not changed then
-		vim.notify("DiffMagik: failed to run git diff", vim.log.levels.ERROR)
-		return
-	end
-	if #changed == 0 then
-		vim.notify(("DiffMagik: no changes in '%s'"):format(rel), vim.log.levels.ERROR)
-		return
-	end
+	if repo:exists_in_head(rel) then
+		local changed = repo:diff_name_only(rel)
+		if not changed then
+			vim.notify("DiffMagik: failed to run git diff", vim.log.levels.ERROR)
+			return
+		end
+		if #changed == 0 then
+			vim.notify(("DiffMagik: no changes in '%s'"):format(rel), vim.log.levels.ERROR)
+			return
+		end
 
-	local head_content = repo:head_lines(rel)
-	if not head_content then
-		vim.notify("DiffMagik: failed to read HEAD version of file", vim.log.levels.ERROR)
-		return
+		head_content = repo:head_lines(rel)
+		if not head_content then
+			vim.notify("DiffMagik: failed to read HEAD version of file", vim.log.levels.ERROR)
+			return
+		end
 	end
 
 	if self.head_win and vim.api.nvim_win_is_valid(self.head_win) then
 		vim.api.nvim_win_close(self.head_win, true)
 	end
+
+	self:restore_main_state()
+	vim.cmd.diffoff({ bang = true })
+	self:save_main_state(main_win)
 
 	vim.cmd.vsplit()
 	self.head_win = vim.api.nvim_get_current_win()
@@ -48,9 +103,14 @@ function DiffSplit:open_against_head(repo, rel)
 	vim.bo[head_buf].filetype = vim.bo[bufnr].filetype
 
 	vim.api.nvim_win_set_buf(self.head_win, head_buf)
+	set_diff_fillchar(self.head_win, "╱")
+	vim.wo[self.head_win].winhighlight =
+		"DiffAdd:DiffMagikDiffAddAsDelete,DiffDelete:DiffMagikDiffDelete"
 	vim.cmd.diffthis()
 
-	vim.cmd.wincmd("p")
+	vim.api.nvim_set_current_win(main_win)
+	set_diff_fillchar(main_win, "╱")
+	vim.wo[main_win].winhighlight = "DiffDelete:DiffMagikDiffDelete"
 	vim.cmd.diffthis()
 end
 

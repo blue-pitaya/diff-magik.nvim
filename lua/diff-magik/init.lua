@@ -11,7 +11,17 @@ function M.setup(opts)
 	local browser = Browser.new()
 	local diffsplit = DiffSplit.new()
 
-	browser:setup_highlights()
+	local function setup_highlights()
+		browser:setup_highlights()
+		DiffSplit.setup_highlights()
+	end
+
+	setup_highlights()
+
+	vim.api.nvim_create_autocmd("ColorScheme", {
+		group = vim.api.nvim_create_augroup("diff-magik", { clear = true }),
+		callback = setup_highlights,
+	})
 
 	vim.api.nvim_create_user_command("DiffMagikOpen", function()
 		local filepath = vim.api.nvim_buf_get_name(0)
