@@ -8,23 +8,8 @@ function DiffSplit.new()
 	return setmetatable({}, DiffSplit)
 end
 
----@param name string
-local function hl_is_defined(name)
-	return not vim.tbl_isempty(vim.api.nvim_get_hl(0, { name = name, create = false }))
-end
-
-function DiffSplit.setup_highlights()
-	local dim = hl_is_defined("DiffviewDiffDeleteDim") and "DiffviewDiffDeleteDim" or "Comment"
-	vim.api.nvim_set_hl(0, "DiffMagikDiffDelete", { link = dim, default = true })
-
-	local delete = vim.api.nvim_get_hl(0, { name = "DiffDelete", link = false })
-	vim.api.nvim_set_hl(0, "DiffMagikDiffAddAsDelete", {
-		fg = delete.fg,
-		bg = delete.bg,
-		ctermfg = delete.ctermfg,
-		ctermbg = delete.ctermbg,
-	})
-end
+local HEAD_WINHL = "DiffAdd:DiffDelete,DiffDelete:DiffviewDiffDeleteDim"
+local MAIN_WINHL = "DiffDelete:DiffviewDiffDeleteDim"
 
 ---@param winid integer
 ---@param char string
@@ -64,6 +49,7 @@ function DiffSplit:open_against_head(repo, rel)
 	local main_win = vim.api.nvim_get_current_win()
 	local bufnr = vim.api.nvim_get_current_buf()
 
+	---@type string[]
 	local head_content = {}
 
 	if repo:exists_in_head(rel) then
@@ -77,11 +63,13 @@ function DiffSplit:open_against_head(repo, rel)
 			return
 		end
 
-		head_content = repo:head_lines(rel)
-		if not head_content then
+		local lines = repo:head_lines(rel)
+		if not lines then
 			vim.notify("DiffMagik: failed to read HEAD version of file", vim.log.levels.ERROR)
 			return
 		end
+
+		head_content = lines
 	end
 
 	if self.head_win and vim.api.nvim_win_is_valid(self.head_win) then
@@ -104,13 +92,12 @@ function DiffSplit:open_against_head(repo, rel)
 
 	vim.api.nvim_win_set_buf(self.head_win, head_buf)
 	set_diff_fillchar(self.head_win, "╱")
-	vim.wo[self.head_win].winhighlight =
-		"DiffAdd:DiffMagikDiffAddAsDelete,DiffDelete:DiffMagikDiffDelete"
+	vim.wo[self.head_win].winhighlight = HEAD_WINHL
 	vim.cmd.diffthis()
 
 	vim.api.nvim_set_current_win(main_win)
 	set_diff_fillchar(main_win, "╱")
-	vim.wo[main_win].winhighlight = "DiffDelete:DiffMagikDiffDelete"
+	vim.wo[main_win].winhighlight = MAIN_WINHL
 	vim.cmd.diffthis()
 end
 

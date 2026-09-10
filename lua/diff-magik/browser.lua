@@ -19,18 +19,14 @@ function Browser.new()
 	return setmetatable({ diffsplit = DiffSplit.new() }, Browser)
 end
 
-function Browser:setup_highlights()
-	vim.api.nvim_set_hl(0, "DiffMagikCursorLine", { link = "CursorLine", default = true })
-end
-
 ---@param status string
 local function status_hl(status)
 	if status == "A" then
-		return "diffAdded"
+		return "Added"
 	elseif status == "D" then
-		return "diffRemoved"
+		return "Removed"
 	end
-	return "diffChanged"
+	return "Changed"
 end
 
 function Browser:render_tree()
@@ -152,7 +148,6 @@ function Browser:open()
 	vim.wo[self.sidebar_win].wrap = false
 	vim.wo[self.sidebar_win].cursorline = true
 	vim.wo[self.sidebar_win].cursorlineopt = "line"
-	vim.wo[self.sidebar_win].winhighlight = "CursorLine:DiffMagikCursorLine"
 
 	self:render_tree()
 
