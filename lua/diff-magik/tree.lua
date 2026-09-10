@@ -11,6 +11,7 @@ TreeNode.__index = TreeNode
 ---@class TreeFlatItem
 ---@field node TreeNode
 ---@field depth integer
+---@field path string directories keep a trailing slash
 
 ---@param entries GitEntry[]
 function TreeNode.new(entries)
@@ -61,11 +62,47 @@ end
 
 ---@param depth integer
 ---@param out TreeFlatItem[]
-function TreeNode:flatten(depth, out)
+---@param prefix string|nil
+function TreeNode:flatten(depth, out, prefix)
+	prefix = prefix or ""
+
 	for _, child in ipairs(self.children) do
-		table.insert(out, { node = child, depth = depth })
+		local path = prefix .. child.name .. (child.is_dir and "/" or "")
+		table.insert(out, { node = child, depth = depth, path = path })
 		if child.is_dir and child.expanded then
-			child:flatten(depth + 1, out)
+			child:flatten(depth + 1, out, path)
+		end
+	end
+end
+
+---@param out table<string, boolean>
+---@param prefix string|nil
+function TreeNode:collect_collapsed(out, prefix)
+	prefix = prefix or ""
+
+	for _, child in ipairs(self.children) do
+		if child.is_dir then
+			local path = prefix .. child.name .. "/"
+			if not child.expanded then
+				out[path] = true
+			end
+			child:collect_collapsed(out, path)
+		end
+	end
+end
+
+---@param collapsed table<string, boolean>
+---@param prefix string|nil
+function TreeNode:apply_collapsed(collapsed, prefix)
+	prefix = prefix or ""
+
+	for _, child in ipairs(self.children) do
+		if child.is_dir then
+			local path = prefix .. child.name .. "/"
+			if collapsed[path] then
+				child.expanded = false
+			end
+			child:apply_collapsed(collapsed, path)
 		end
 	end
 end

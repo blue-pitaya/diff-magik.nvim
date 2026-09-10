@@ -113,6 +113,40 @@ function Browser:render_tree()
 	end
 end
 
+function Browser:refresh()
+	if not self.repo or not self.sidebar_win or not vim.api.nvim_win_is_valid(self.sidebar_win) then
+		return
+	end
+
+	local entries = self.repo:get_changed_files()
+	if not entries then
+		return
+	end
+
+	local line = vim.api.nvim_win_get_cursor(self.sidebar_win)[1]
+	local cursor_path = self.flat and self.flat[line] and self.flat[line].path
+
+	local collapsed = {}
+	if self.tree then
+		self.tree:collect_collapsed(collapsed)
+	end
+
+	self.tree = TreeNode.new(entries)
+	self.tree:sort()
+	self.tree:apply_collapsed(collapsed)
+
+	self:render_tree()
+
+	local target = 1
+	for i, item in ipairs(self.flat) do
+		if item.path == cursor_path then
+			target = i
+			break
+		end
+	end
+	vim.api.nvim_win_set_cursor(self.sidebar_win, { math.min(target, math.max(#self.flat, 1)), 0 })
+end
+
 function Browser:clear_diff_keymaps()
 	local keys = config.options.keys
 
@@ -272,6 +306,14 @@ function Browser:open()
 	vim.wo[self.sidebar_win].cursorlineopt = "line"
 
 	self:render_tree()
+
+	vim.api.nvim_create_autocmd("BufEnter", {
+		buffer = self.sidebar_buf,
+		callback = function()
+			self:refresh()
+		end,
+		desc = "DiffMagik: refresh the changed-file list",
+	})
 
 	local keys = config.options.keys
 	map(self.sidebar_buf, keys.open, function()
