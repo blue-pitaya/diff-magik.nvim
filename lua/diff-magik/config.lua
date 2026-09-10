@@ -3,6 +3,7 @@
 ---@field close string[] close the sidebar
 ---@field next_file string[] open the next changed file, from either diff pane
 ---@field prev_file string[] open the previous changed file, from either diff pane
+---@field stage string[] stage the entry under the cursor, or unstage it if fully staged
 
 ---@class DiffMagikHighlights
 ---@field added string status letter for files absent from HEAD
@@ -24,8 +25,9 @@ local defaults = {
 	keys = {
 		open = { "<CR>", "o" },
 		close = { "q" },
-		next_file = { "<C-n>" },
-		prev_file = { "<C-p>" },
+		next_file = { "8" },
+		prev_file = { "9" },
+		stage = { "3" },
 	},
 	highlights = {
 		added = "Added",

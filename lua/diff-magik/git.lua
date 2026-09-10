@@ -28,6 +28,11 @@ function Git.new(dir)
 	return setmetatable({ root = root }, Git)
 end
 
+---@param root string absolute path to the repo's top level
+function Git.from_root(root)
+	return setmetatable({ root = root }, Git)
+end
+
 ---@param rel string path to the file, relative to `self.root`
 function Git:exists_in_head(rel)
 	return run({ "-C", self.root, "cat-file", "-e", ("HEAD:%s"):format(rel) }) ~= nil
@@ -36,6 +41,37 @@ end
 ---@param rel string
 function Git:diff_name_only(rel)
 	return run({ "-C", self.root, "diff", "--name-only", "HEAD", "--", rel })
+end
+
+---@param rel string
+function Git:stage(rel)
+	return run({ "-C", self.root, "add", "--", rel }) ~= nil
+end
+
+---@param rel string
+function Git:unstage(rel)
+	return run({ "-C", self.root, "restore", "--staged", "--", rel }) ~= nil
+end
+
+---@param rel string
+function Git:is_staged(rel)
+	local out = run({ "-C", self.root, "diff", "--cached", "--name-only", "HEAD", "--", rel })
+	return out ~= nil and #out > 0
+end
+
+---@param rel string
+function Git:is_unstaged(rel)
+	local out = run({ "-C", self.root, "diff", "--name-only", "--", rel })
+	return out ~= nil and #out > 0
+end
+
+---@param rel string
+---@return boolean ok
+function Git:toggle_stage(rel)
+	if self:is_staged(rel) and not self:is_unstaged(rel) then
+		return self:unstage(rel)
+	end
+	return self:stage(rel)
 end
 
 ---@param rel string

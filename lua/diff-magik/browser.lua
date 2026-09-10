@@ -22,21 +22,57 @@ function Browser.new()
 	return setmetatable({ diffsplit = DiffSplit.new(), diff_bufs = {} }, Browser)
 end
 
+local SIDEBAR_ACTIONS = { "open", "stage", "close" }
+local DIFF_ACTIONS = { "next_file", "prev_file" }
+
+local DESCRIPTIONS = {
+	open = "DiffMagik: open entry",
+	close = "DiffMagik: close browser",
+	stage = "DiffMagik: stage or unstage entry",
+	next_file = "DiffMagik: next changed file",
+	prev_file = "DiffMagik: previous changed file",
+}
+
 ---@param bufnr integer
----@param keys string[]
----@param fn fun()
----@param desc string
-local function map(bufnr, keys, fn, desc)
-	for _, key in ipairs(keys) do
-		vim.keymap.set("n", key, fn, { buffer = bufnr, nowait = true, silent = true, desc = desc })
+---@param names string[]
+function Browser:set_keymaps(bufnr, names)
+	local handlers = {
+		open = function()
+			self:open_selected()
+		end,
+		close = function()
+			self:close()
+		end,
+		stage = function()
+			self:toggle_stage_selected()
+		end,
+		next_file = function()
+			self:select_offset(1)
+		end,
+		prev_file = function()
+			self:select_offset(-1)
+		end,
+	}
+
+	for _, name in ipairs(names) do
+		for _, key in ipairs(config.options.keys[name]) do
+			vim.keymap.set("n", key, handlers[name], {
+				buffer = bufnr,
+				nowait = true,
+				silent = true,
+				desc = DESCRIPTIONS[name],
+			})
+		end
 	end
 end
 
 ---@param bufnr integer
----@param keys string[]
-local function unmap(bufnr, keys)
-	for _, key in ipairs(keys) do
-		pcall(vim.keymap.del, "n", key, { buffer = bufnr })
+---@param names string[]
+local function del_keymaps(bufnr, names)
+	for _, name in ipairs(names) do
+		for _, key in ipairs(config.options.keys[name]) do
+			pcall(vim.keymap.del, "n", key, { buffer = bufnr })
+		end
 	end
 end
 
@@ -148,12 +184,9 @@ function Browser:refresh()
 end
 
 function Browser:clear_diff_keymaps()
-	local keys = config.options.keys
-
 	for _, buf in ipairs(self.diff_bufs) do
 		if vim.api.nvim_buf_is_valid(buf) then
-			unmap(buf, keys.next_file)
-			unmap(buf, keys.prev_file)
+			del_keymaps(buf, DIFF_ACTIONS)
 		end
 	end
 	self.diff_bufs = {}
@@ -163,14 +196,8 @@ end
 function Browser:set_diff_keymaps(bufs)
 	self:clear_diff_keymaps()
 
-	local keys = config.options.keys
 	for _, buf in ipairs(bufs) do
-		map(buf, keys.next_file, function()
-			self:select_offset(1)
-		end, "DiffMagik: next changed file")
-		map(buf, keys.prev_file, function()
-			self:select_offset(-1)
-		end, "DiffMagik: previous changed file")
+		self:set_keymaps(buf, DIFF_ACTIONS)
 	end
 
 	self.diff_bufs = bufs
@@ -245,7 +272,29 @@ function Browser:open_selected()
 	end
 end
 
+function Browser:toggle_stage_selected()
+	local repo = self.repo
+	if not repo or not self.flat or not self.sidebar_win then
+		return
+	end
+
+	local line = vim.api.nvim_win_get_cursor(self.sidebar_win)[1]
+	local item = self.flat[line]
+	if not item or item.node.is_dir then
+		return
+	end
+
+	local entry = item.node.entry
+	if not repo:toggle_stage(entry.path) then
+		vim.notify(("DiffMagik: failed to update the index for '%s'"):format(entry.path), vim.log.levels.ERROR)
+		return
+	end
+
+	self:refresh()
+end
+
 function Browser:close()
+
 	self:clear_diff_keymaps()
 
 	if self.sidebar_win and vim.api.nvim_win_is_valid(self.sidebar_win) then
@@ -315,13 +364,7 @@ function Browser:open()
 		desc = "DiffMagik: refresh the changed-file list",
 	})
 
-	local keys = config.options.keys
-	map(self.sidebar_buf, keys.open, function()
-		self:open_selected()
-	end, "DiffMagik: open entry")
-	map(self.sidebar_buf, keys.close, function()
-		self:close()
-	end, "DiffMagik: close browser")
+	self:set_keymaps(self.sidebar_buf, SIDEBAR_ACTIONS)
 end
 
 return Browser

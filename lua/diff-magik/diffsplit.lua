@@ -89,6 +89,8 @@ function DiffSplit:open_against_head(repo, rel)
 	vim.bo[head_buf].swapfile = false
 	vim.bo[head_buf].filetype = vim.bo[bufnr].filetype
 	vim.bo[head_buf].modifiable = false
+	vim.b[head_buf].diffmagik_root = repo.root
+	vim.b[head_buf].diffmagik_path = rel
 
 	vim.api.nvim_win_set_buf(self.head_win, head_buf)
 	set_diff_fillchar(self.head_win, config.options.fillchar)
