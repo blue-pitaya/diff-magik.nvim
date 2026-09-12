@@ -1,15 +1,12 @@
 local Git = require("diff-magik.git")
 local TreeNode = require("diff-magik.tree")
-local DiffSplit = require("diff-magik.diffsplit")
+local Layout = require("diff-magik.layout")
 local config = require("diff-magik.config")
 
 local ns = vim.api.nvim_create_namespace("diff-magik")
 
 ---@class Browser
----@field sidebar_win integer|nil
----@field sidebar_buf integer|nil
----@field main_win integer|nil
----@field diffsplit DiffSplit
+---@field layout Layout
 ---@field repo Git|nil
 ---@field tree TreeNode|nil
 ---@field flat TreeFlatItem[]|nil
@@ -19,7 +16,7 @@ local Browser = {}
 Browser.__index = Browser
 
 function Browser.new()
-	return setmetatable({ diffsplit = DiffSplit.new(), diff_bufs = {} }, Browser)
+	return setmetatable({ layout = Layout.new(), diff_bufs = {} }, Browser)
 end
 
 local SIDEBAR_ACTIONS = { "open", "stage", "close" }
@@ -102,6 +99,11 @@ local function stage_hl(entry)
 end
 
 function Browser:render_tree()
+	local buf = self.layout.sidebar_buf
+	if not buf or not vim.api.nvim_buf_is_valid(buf) then
+		return
+	end
+
 	local flat = {}
 	self.tree:flatten(0, flat)
 	self.flat = flat
@@ -120,19 +122,19 @@ function Browser:render_tree()
 		end
 	end
 
-	vim.bo[self.sidebar_buf].modifiable = true
-	vim.api.nvim_buf_set_lines(self.sidebar_buf, 0, -1, false, lines)
-	vim.bo[self.sidebar_buf].modifiable = false
+	vim.bo[buf].modifiable = true
+	vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+	vim.bo[buf].modifiable = false
 
-	vim.api.nvim_buf_clear_namespace(self.sidebar_buf, ns, 0, -1)
+	vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
 	for i, item in ipairs(flat) do
 		if item.node.is_dir then
-			vim.api.nvim_buf_set_extmark(self.sidebar_buf, ns, i - 1, 0, {
+			vim.api.nvim_buf_set_extmark(buf, ns, i - 1, 0, {
 				line_hl_group = config.options.highlights.directory,
 			})
 		else
 			local col = #("  "):rep(item.depth)
-			vim.api.nvim_buf_set_extmark(self.sidebar_buf, ns, i - 1, col, {
+			vim.api.nvim_buf_set_extmark(buf, ns, i - 1, col, {
 				end_col = col + 1,
 				hl_group = status_hl(item.node.entry.status),
 			})
@@ -140,7 +142,7 @@ function Browser:render_tree()
 			local suffix = stage_suffix(item.node.entry)
 			if suffix ~= "" then
 				local end_col = #lines[i]
-				vim.api.nvim_buf_set_extmark(self.sidebar_buf, ns, i - 1, end_col - #suffix + 1, {
+				vim.api.nvim_buf_set_extmark(buf, ns, i - 1, end_col - #suffix + 1, {
 					end_col = end_col,
 					hl_group = stage_hl(item.node.entry),
 				})
@@ -150,7 +152,7 @@ function Browser:render_tree()
 end
 
 function Browser:refresh()
-	if not self.repo or not self.sidebar_win or not vim.api.nvim_win_is_valid(self.sidebar_win) then
+	if not self.repo or not self.layout:has_sidebar() then
 		return
 	end
 
@@ -159,8 +161,8 @@ function Browser:refresh()
 		return
 	end
 
-	local line = vim.api.nvim_win_get_cursor(self.sidebar_win)[1]
-	local cursor_path = self.flat and self.flat[line] and self.flat[line].path
+	local line = self.layout:sidebar_cursor()
+	local cursor_path = line and self.flat and self.flat[line] and self.flat[line].path
 
 	local collapsed = {}
 	if self.tree then
@@ -180,7 +182,7 @@ function Browser:refresh()
 			break
 		end
 	end
-	vim.api.nvim_win_set_cursor(self.sidebar_win, { math.min(target, math.max(#self.flat, 1)), 0 })
+	self.layout:set_sidebar_cursor(math.min(target, math.max(#self.flat, 1)))
 end
 
 function Browser:clear_diff_keymaps()
@@ -226,9 +228,7 @@ function Browser:select_offset(offset)
 	local i = index + offset
 	while self.flat[i] do
 		if not self.flat[i].node.is_dir then
-			if self.sidebar_win and vim.api.nvim_win_is_valid(self.sidebar_win) then
-				vim.api.nvim_win_set_cursor(self.sidebar_win, { i, 0 })
-			end
+			self.layout:set_sidebar_cursor(i)
 			self:open_entry(self.flat[i].node.entry)
 			return
 		end
@@ -238,27 +238,18 @@ end
 
 ---@param entry GitEntry
 function Browser:open_entry(entry)
-	if not vim.api.nvim_win_is_valid(self.main_win) then
-		vim.notify("DiffMagik: target window is no longer open", vim.log.levels.ERROR)
+	local bufs = self.layout:open_file(self.repo, entry.path)
+	if not bufs then
 		return
 	end
 
-	vim.api.nvim_set_current_win(self.main_win)
-	vim.cmd.edit({ args = { vim.fs.joinpath(self.repo.root, entry.path) } })
-	self.diffsplit:open_against_head(self.repo, entry.path)
 	self.current_path = entry.path
-
-	local bufs = { vim.api.nvim_win_get_buf(self.main_win) }
-	local head_win = self.diffsplit.head_win
-	if head_win and vim.api.nvim_win_is_valid(head_win) then
-		table.insert(bufs, vim.api.nvim_win_get_buf(head_win))
-	end
 	self:set_diff_keymaps(bufs)
 end
 
 function Browser:open_selected()
-	local line = vim.api.nvim_win_get_cursor(self.sidebar_win)[1]
-	local item = self.flat[line]
+	local line = self.layout:sidebar_cursor()
+	local item = line and self.flat[line]
 	if not item then
 		return
 	end
@@ -266,7 +257,7 @@ function Browser:open_selected()
 	if item.node.is_dir then
 		item.node.expanded = not item.node.expanded
 		self:render_tree()
-		vim.api.nvim_win_set_cursor(self.sidebar_win, { line, 0 })
+		self.layout:set_sidebar_cursor(line)
 	else
 		self:open_entry(item.node.entry)
 	end
@@ -274,12 +265,12 @@ end
 
 function Browser:toggle_stage_selected()
 	local repo = self.repo
-	if not repo or not self.flat or not self.sidebar_win then
+	if not repo or not self.flat then
 		return
 	end
 
-	local line = vim.api.nvim_win_get_cursor(self.sidebar_win)[1]
-	local item = self.flat[line]
+	local line = self.layout:sidebar_cursor()
+	local item = line and self.flat[line]
 	if not item or item.node.is_dir then
 		return
 	end
@@ -294,17 +285,12 @@ function Browser:toggle_stage_selected()
 end
 
 function Browser:close()
-
 	self:clear_diff_keymaps()
-
-	if self.sidebar_win and vim.api.nvim_win_is_valid(self.sidebar_win) then
-		vim.api.nvim_win_close(self.sidebar_win, true)
-	end
+	self.layout:close()
 end
 
 function Browser:open()
-	if self.sidebar_win and vim.api.nvim_win_is_valid(self.sidebar_win) then
-		vim.api.nvim_set_current_win(self.sidebar_win)
+	if self.layout:focus_sidebar() then
 		return
 	end
 
@@ -332,39 +318,19 @@ function Browser:open()
 
 	self.repo = repo
 	self.tree = tree
-	self.main_win = vim.api.nvim_get_current_win()
 
-	vim.cmd.vsplit({ mods = { split = "topleft" } })
-	self.sidebar_win = vim.api.nvim_get_current_win()
-	vim.api.nvim_win_set_width(self.sidebar_win, 40)
-	self.sidebar_buf = vim.api.nvim_create_buf(false, true)
-	vim.api.nvim_win_set_buf(self.sidebar_win, self.sidebar_buf)
-
-	vim.api.nvim_buf_set_name(self.sidebar_buf, "diffmagik://changes")
-	vim.bo[self.sidebar_buf].buftype = "nofile"
-	vim.bo[self.sidebar_buf].bufhidden = "wipe"
-	vim.bo[self.sidebar_buf].swapfile = false
-	vim.bo[self.sidebar_buf].filetype = "diffmagik"
-
-	vim.wo[self.sidebar_win].winfixwidth = true
-	vim.wo[self.sidebar_win].number = false
-	vim.wo[self.sidebar_win].relativenumber = false
-	vim.wo[self.sidebar_win].signcolumn = "no"
-	vim.wo[self.sidebar_win].wrap = false
-	vim.wo[self.sidebar_win].cursorline = true
-	vim.wo[self.sidebar_win].cursorlineopt = "line"
-
+	local bufnr = self.layout:open_sidebar()
 	self:render_tree()
 
 	vim.api.nvim_create_autocmd("BufEnter", {
-		buffer = self.sidebar_buf,
+		buffer = bufnr,
 		callback = function()
 			self:refresh()
 		end,
 		desc = "DiffMagik: refresh the changed-file list",
 	})
 
-	self:set_keymaps(self.sidebar_buf, SIDEBAR_ACTIONS)
+	self:set_keymaps(bufnr, SIDEBAR_ACTIONS)
 end
 
 return Browser
