@@ -1,13 +1,18 @@
 ---@class Git
 ---@field root string absolute path to the git repo's top level
+---@field has_head boolean|nil
+---@field empty_tree string|nil
 local Git = {}
 Git.__index = Git
 
+local EMPTY_TREE_SHA1 = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
 ---@param args string[]
-local function run(args)
+---@param stdin string|nil
+local function run(args, stdin)
 	local cmd = { "git" }
 	vim.list_extend(cmd, args)
-	local result = vim.system(cmd, { text = true }):wait()
+	local result = vim.system(cmd, { text = true, stdin = stdin }):wait(stdin and 5000 or nil)
 	if result.code ~= 0 then
 		return nil
 	end
@@ -33,14 +38,30 @@ function Git.from_root(root)
 	return setmetatable({ root = root }, Git)
 end
 
+---@return string rev `HEAD`, or the empty tree while the repo has no commits
+function Git:base()
+	if not self.has_head then
+		self.has_head = run({ "-C", self.root, "rev-parse", "--verify", "--quiet", "HEAD" }) ~= nil
+	end
+	if self.has_head then
+		return "HEAD"
+	end
+
+	if not self.empty_tree then
+		local out = run({ "-C", self.root, "hash-object", "-t", "tree", "--stdin" }, "")
+		self.empty_tree = out and out[1] or EMPTY_TREE_SHA1
+	end
+	return self.empty_tree
+end
+
 ---@param rel string path to the file, relative to `self.root`
 function Git:exists_in_head(rel)
-	return run({ "-C", self.root, "cat-file", "-e", ("HEAD:%s"):format(rel) }) ~= nil
+	return run({ "-C", self.root, "cat-file", "-e", ("%s:%s"):format(self:base(), rel) }) ~= nil
 end
 
 ---@param rel string
 function Git:diff_name_only(rel)
-	return run({ "-C", self.root, "diff", "--name-only", "HEAD", "--", rel })
+	return run({ "-C", self.root, "diff", "--name-only", self:base(), "--", rel })
 end
 
 ---@param rel string
@@ -50,12 +71,15 @@ end
 
 ---@param rel string
 function Git:unstage(rel)
+	if self:base() ~= "HEAD" then
+		return run({ "-C", self.root, "rm", "--cached", "--quiet", "--force", "--", rel }) ~= nil
+	end
 	return run({ "-C", self.root, "restore", "--staged", "--", rel }) ~= nil
 end
 
 ---@param rel string
 function Git:is_staged(rel)
-	local out = run({ "-C", self.root, "diff", "--cached", "--name-only", "HEAD", "--", rel })
+	local out = run({ "-C", self.root, "diff", "--cached", "--name-only", self:base(), "--", rel })
 	return out ~= nil and #out > 0
 end
 
@@ -76,7 +100,7 @@ end
 
 ---@param rel string
 function Git:head_lines(rel)
-	return run({ "-C", self.root, "show", ("HEAD:%s"):format(rel) })
+	return run({ "-C", self.root, "show", ("%s:%s"):format(self:base(), rel) })
 end
 
 ---@class GitEntry
@@ -113,6 +137,8 @@ end
 
 ---@return GitEntry[]|nil
 function Git:get_changed_files()
+	local base = self:base()
+
 	local tracked = run({
 		"-C",
 		self.root,
@@ -120,7 +146,7 @@ function Git:get_changed_files()
 		"--ignore-submodules",
 		"--no-renames",
 		"--name-status",
-		"HEAD",
+		base,
 	})
 	if not tracked then
 		return nil
@@ -136,7 +162,7 @@ function Git:get_changed_files()
 		"--no-renames",
 		"--cached",
 		"--name-only",
-		"HEAD",
+		base,
 	}))
 	local unstaged = path_set(run({
 		"-C",
