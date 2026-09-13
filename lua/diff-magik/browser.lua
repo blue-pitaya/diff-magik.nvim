@@ -19,13 +19,14 @@ function Browser.new()
 	return setmetatable({ layout = Layout.new(), diff_bufs = {} }, Browser)
 end
 
-local SIDEBAR_ACTIONS = { "open", "stage", "close" }
+local SIDEBAR_ACTIONS = { "open", "stage", "reset", "close" }
 local DIFF_ACTIONS = { "next_file", "prev_file" }
 
 local DESCRIPTIONS = {
 	open = "DiffMagik: open entry",
 	close = "DiffMagik: close browser",
 	stage = "DiffMagik: stage or unstage entry",
+	reset = "DiffMagik: discard the changes to entry",
 	next_file = "DiffMagik: next changed file",
 	prev_file = "DiffMagik: previous changed file",
 }
@@ -42,6 +43,9 @@ function Browser:set_keymaps(bufnr, names)
 		end,
 		stage = function()
 			self:toggle_stage_selected()
+		end,
+		reset = function()
+			self:reset_selected()
 		end,
 		next_file = function()
 			self:select_offset(1)
@@ -263,22 +267,48 @@ function Browser:open_selected()
 	end
 end
 
-function Browser:toggle_stage_selected()
-	local repo = self.repo
-	if not repo or not self.flat then
-		return
-	end
-
+---@return GitEntry|nil
+function Browser:selected_entry()
 	local line = self.layout:sidebar_cursor()
-	local item = line and self.flat[line]
+	local item = line and self.flat and self.flat[line]
 	if not item or item.node.is_dir then
+		return nil
+	end
+	return item.node.entry
+end
+
+function Browser:toggle_stage_selected()
+	local entry = self:selected_entry()
+	if not self.repo or not entry then
 		return
 	end
 
-	local entry = item.node.entry
-	if not repo:toggle_stage(entry.path) then
+	if not self.repo:toggle_stage(entry.path) then
 		vim.notify(("DiffMagik: failed to update the index for '%s'"):format(entry.path), vim.log.levels.ERROR)
 		return
+	end
+
+	self:refresh()
+end
+
+function Browser:reset_selected()
+	local entry = self:selected_entry()
+	if not self.repo or not entry then
+		return
+	end
+
+	local prompt = ("DiffMagik: discard all changes to '%s'?"):format(entry.path)
+	if vim.fn.confirm(prompt, "&yes\n&no", 2, "Question") ~= 1 then
+		return
+	end
+
+	if not self.repo:reset(entry.path) then
+		vim.notify(("DiffMagik: failed to reset '%s'"):format(entry.path), vim.log.levels.ERROR)
+		return
+	end
+
+	if self.current_path == entry.path then
+		self.layout:reload_main()
 	end
 
 	self:refresh()

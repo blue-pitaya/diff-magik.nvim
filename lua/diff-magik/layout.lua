@@ -171,6 +171,17 @@ function Layout:open_file(repo, rel)
 	return bufs
 end
 
+--- Drops whatever the working-copy pane holds in favour of what is on disk now.
+function Layout:reload_main()
+	if not win_valid(self.main_win) then
+		return
+	end
+
+	vim.api.nvim_win_call(self.main_win, function()
+		pcall(vim.cmd.edit, { bang = true })
+	end)
+end
+
 function Layout:close()
 	if self:has_sidebar() then
 		vim.api.nvim_win_close(self.sidebar_win, true)

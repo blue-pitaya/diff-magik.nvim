@@ -99,6 +99,24 @@ function Git:toggle_stage(rel)
 end
 
 ---@param rel string
+---@return boolean ok
+function Git:reset(rel)
+	if self:exists_in_head(rel) then
+		return run({ "-C", self.root, "checkout", self:base(), "--", rel }) ~= nil
+	end
+
+	if self:is_staged(rel) and not self:unstage(rel) then
+		return false
+	end
+
+	local path = vim.fs.joinpath(self.root, rel)
+	if not vim.uv.fs_stat(path) then
+		return true
+	end
+	return vim.uv.fs_unlink(path) ~= nil
+end
+
+---@param rel string
 function Git:head_lines(rel)
 	return run({ "-C", self.root, "show", ("%s:%s"):format(self:base(), rel) })
 end

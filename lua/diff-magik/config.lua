@@ -4,6 +4,7 @@
 ---@field next_file string[] open the next changed file, from either diff pane
 ---@field prev_file string[] open the previous changed file, from either diff pane
 ---@field stage string[] stage the entry under the cursor, or unstage it if fully staged
+---@field reset string[] discard every change to the entry under the cursor
 
 ---@class DiffMagikHighlights
 ---@field added string status letter for files absent from HEAD
@@ -28,6 +29,7 @@ local defaults = {
 		next_file = { "1" },
 		prev_file = { "2" },
 		stage = { "3" },
+		reset = { "X" },
 	},
 	highlights = {
 		added = "Added",

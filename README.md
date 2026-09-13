@@ -31,6 +31,7 @@ require("diff-magik").setup({
     next_file = { "1" },
     prev_file = { "2" },
     stage = { "3" },
+    reset = { "X" },
   },
   highlights = {
     added = "Added",
