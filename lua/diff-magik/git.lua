@@ -23,8 +23,27 @@ local function run(args, stdin)
 	return lines
 end
 
+--- `git -C` fails outright on a missing directory, which a deleted file's parent may well be.
+---@param dir string
+---@return string|nil dir the closest ancestor that still exists on disk
+local function existing_dir(dir)
+	while not vim.uv.fs_stat(dir) do
+		local parent = vim.fs.dirname(dir)
+		if not parent or parent == dir then
+			return nil
+		end
+		dir = parent
+	end
+	return dir
+end
+
 ---@param dir string
 function Git.new(dir)
+	dir = existing_dir(dir)
+	if not dir then
+		return nil
+	end
+
 	local out = run({ "-C", dir, "rev-parse", "--show-toplevel" })
 	local root = out and out[1] or nil
 	if not root then

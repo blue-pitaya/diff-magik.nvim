@@ -164,6 +164,9 @@ function DiffSplit:open_against_head(repo, rel)
 	self.main_buf = bufnr
 	self:save_main_state(main_win)
 
+	vim.b[bufnr].diffmagik_root = repo.root
+	vim.b[bufnr].diffmagik_path = rel
+
 	vim.cmd.vsplit()
 	self.head_win = vim.api.nvim_get_current_win()
 	local head_buf = vim.api.nvim_create_buf(false, true)
