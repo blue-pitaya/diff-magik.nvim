@@ -1,13 +1,19 @@
 local config = require("diff-magik.config")
 
+local group_id = 0
+
 ---@class DiffSplit
 ---@field head_win integer|nil the window id of the currently open HEAD-side split
----@field main_state { win: integer, fillchars: string, winhighlight: string }|nil
+---@field main_win integer|nil the window holding the working copy
+---@field main_buf integer|nil the buffer the HEAD-side split was built for
+---@field main_state { fillchars: string, winhighlight: string }|nil
+---@field augroup integer
 local DiffSplit = {}
 DiffSplit.__index = DiffSplit
 
-function DiffSplit.new()
-	return setmetatable({}, DiffSplit)
+---@param winid integer|nil
+local function win_valid(winid)
+	return winid ~= nil and vim.api.nvim_win_is_valid(winid)
 end
 
 ---@param winid integer
@@ -22,9 +28,51 @@ local function set_diff_fillchar(winid, char)
 end
 
 ---@param winid integer
+---@param winhighlight string
+local function diff_on(winid, winhighlight)
+	if vim.wo[winid].diff and vim.wo[winid].foldmethod == "diff" then
+		return
+	end
+
+	set_diff_fillchar(winid, config.options.fillchar)
+	vim.wo[winid].winhighlight = winhighlight
+	vim.api.nvim_win_call(winid, function()
+		vim.cmd.diffthis()
+	end)
+end
+
+---@param winid integer|nil
+local function diff_off(winid)
+	if not win_valid(winid) or not vim.wo[winid].diff then
+		return
+	end
+
+	vim.api.nvim_win_call(winid, function()
+		vim.cmd.diffoff()
+	end)
+end
+
+function DiffSplit.new()
+	group_id = group_id + 1
+
+	local self = setmetatable({
+		augroup = vim.api.nvim_create_augroup(("diff-magik.diffsplit.%d"):format(group_id), { clear = true }),
+	}, DiffSplit)
+
+	vim.api.nvim_create_autocmd({ "BufEnter", "BufWinEnter" }, {
+		group = self.augroup,
+		callback = function()
+			self:sync()
+		end,
+		desc = "DiffMagik: keep diff mode bound to the file the HEAD pane was opened for",
+	})
+
+	return self
+end
+
+---@param winid integer
 function DiffSplit:save_main_state(winid)
 	self.main_state = {
-		win = winid,
 		fillchars = vim.api.nvim_get_option_value("fillchars", { scope = "local", win = winid }),
 		winhighlight = vim.wo[winid].winhighlight,
 	}
@@ -32,14 +80,38 @@ end
 
 function DiffSplit:restore_main_state()
 	local state = self.main_state
-	self.main_state = nil
 
-	if not state or not vim.api.nvim_win_is_valid(state.win) then
+	if not state or not win_valid(self.main_win) then
 		return
 	end
 
-	vim.api.nvim_set_option_value("fillchars", state.fillchars, { scope = "local", win = state.win })
-	vim.wo[state.win].winhighlight = state.winhighlight
+	vim.api.nvim_set_option_value("fillchars", state.fillchars, { scope = "local", win = self.main_win })
+	vim.wo[self.main_win].winhighlight = state.winhighlight
+end
+
+---@return boolean
+function DiffSplit:showing_main_buf()
+	return win_valid(self.main_win)
+		and self.main_buf ~= nil
+		and vim.api.nvim_win_get_buf(self.main_win) == self.main_buf
+end
+
+--- Suspends the diff while the main window is showing some other buffer, and rebuilds it on return.
+function DiffSplit:sync()
+	if not win_valid(self.main_win) or not self.main_buf then
+		return
+	end
+
+	if self:showing_main_buf() then
+		diff_on(self.main_win, config.options.highlights.main_win)
+		if win_valid(self.head_win) then
+			diff_on(self.head_win, config.options.highlights.head_win)
+		end
+	else
+		diff_off(self.main_win)
+		self:restore_main_state()
+		diff_off(self.head_win)
+	end
 end
 
 ---@param repo Git
@@ -71,12 +143,15 @@ function DiffSplit:open_against_head(repo, rel)
 		head_content = lines
 	end
 
-	if self.head_win and vim.api.nvim_win_is_valid(self.head_win) then
+	if win_valid(self.head_win) then
 		vim.api.nvim_win_close(self.head_win, true)
 	end
 
 	self:restore_main_state()
 	vim.cmd.diffoff({ bang = true })
+
+	self.main_win = main_win
+	self.main_buf = bufnr
 	self:save_main_state(main_win)
 
 	vim.cmd.vsplit()
@@ -93,14 +168,9 @@ function DiffSplit:open_against_head(repo, rel)
 	vim.b[head_buf].diffmagik_path = rel
 
 	vim.api.nvim_win_set_buf(self.head_win, head_buf)
-	set_diff_fillchar(self.head_win, config.options.fillchar)
-	vim.wo[self.head_win].winhighlight = config.options.highlights.head_win
-	vim.cmd.diffthis()
 
 	vim.api.nvim_set_current_win(main_win)
-	set_diff_fillchar(main_win, config.options.fillchar)
-	vim.wo[main_win].winhighlight = config.options.highlights.main_win
-	vim.cmd.diffthis()
+	self:sync()
 end
 
 return DiffSplit
