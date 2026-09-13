@@ -39,6 +39,12 @@ local function diff_on(winid, winhighlight)
 	vim.api.nvim_win_call(winid, function()
 		vim.cmd.diffthis()
 	end)
+
+	-- A pane with nothing to scroll through would drag its partner back to the top on every entry.
+	if vim.api.nvim_buf_line_count(vim.api.nvim_win_get_buf(winid)) <= 1 then
+		vim.wo[winid].scrollbind = false
+		vim.wo[winid].cursorbind = false
+	end
 end
 
 ---@param winid integer|nil

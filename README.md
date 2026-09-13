@@ -28,8 +28,8 @@ require("diff-magik").setup({
   keys = {
     open = { "<CR>", "o" },
     close = { "q" },
-    next_file = { "8" },
-    prev_file = { "9" },
+    next_file = { "1" },
+    prev_file = { "2" },
     stage = { "3" },
   },
   highlights = {
