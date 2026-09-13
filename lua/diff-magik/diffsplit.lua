@@ -34,11 +34,15 @@ local function diff_on(winid, winhighlight)
 		return
 	end
 
+	-- `:diffthis` forces 'wrap' off unless 'diffopt' carries "followwrap", which is a global opt-in.
+	local wrap = vim.wo[winid].wrap
+
 	set_diff_fillchar(winid, config.options.fillchar)
 	vim.wo[winid].winhighlight = winhighlight
 	vim.api.nvim_win_call(winid, function()
 		vim.cmd.diffthis()
 	end)
+	vim.wo[winid].wrap = wrap
 
 	-- A pane with nothing to scroll through would drag its partner back to the top on every entry.
 	if vim.api.nvim_buf_line_count(vim.api.nvim_win_get_buf(winid)) <= 1 then
