@@ -8,15 +8,17 @@ Git.__index = Git
 local EMPTY_TREE_SHA1 = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
 ---@param args string[]
----@param stdin string|nil
-local function run(args, stdin)
+---@param opts { stdin?: string, sep?: string }|nil
+local function run(args, opts)
+	opts = opts or {}
+
 	local cmd = { "git" }
 	vim.list_extend(cmd, args)
-	local result = vim.system(cmd, { text = true, stdin = stdin }):wait(stdin and 5000 or nil)
+	local result = vim.system(cmd, { text = true, stdin = opts.stdin }):wait(opts.stdin and 5000 or nil)
 	if result.code ~= 0 then
 		return nil
 	end
-	local lines = vim.split(result.stdout, "\n")
+	local lines = vim.split(result.stdout, opts.sep or "\n")
 	if lines[#lines] == "" then
 		table.remove(lines)
 	end
@@ -67,7 +69,7 @@ function Git:base()
 	end
 
 	if not self.empty_tree then
-		local out = run({ "-C", self.root, "hash-object", "-t", "tree", "--stdin" }, "")
+		local out = run({ "-C", self.root, "hash-object", "-t", "tree", "--stdin" }, { stdin = "" })
 		self.empty_tree = out and out[1] or EMPTY_TREE_SHA1
 	end
 	return self.empty_tree
@@ -146,85 +148,47 @@ end
 ---@field staged boolean the index differs from HEAD
 ---@field unstaged boolean the working tree differs from the index
 
----@param lines string[]|nil
----@return table<string, boolean>
-local function path_set(lines)
-	local set = {}
-	for _, path in ipairs(lines or {}) do
-		set[path] = true
+---@param x string index status letter
+---@param y string working-tree status letter
+local function entry_status(x, y)
+	if x == "?" then
+		return "A"
 	end
-	return set
-end
-
----@param line string
----@param staged table<string, boolean>
----@param unstaged table<string, boolean>
----@return GitEntry
-local function parse_name_status(line, staged, unstaged)
-	local status, path = line:match("^(%S+)\t(.*)$")
-	path = path or line
-
-	return {
-		status = status and status:sub(1, 1) or "M",
-		path = path,
-		staged = staged[path] or false,
-		unstaged = unstaged[path] or false,
-	}
+	if x ~= " " then
+		return x
+	end
+	return y
 end
 
 ---@return GitEntry[]|nil
 function Git:get_changed_files()
-	local base = self:base()
-
-	local tracked = run({
+	-- `git diff HEAD` misses paths the index changed but the working tree did not, such as a staged
+	-- new file deleted from disk again; `git status` reports both sides of every path in one pass.
+	local records = run({
 		"-C",
 		self.root,
-		"diff",
-		"--ignore-submodules",
+		"status",
+		"--porcelain",
+		"-z",
+		"--untracked-files=all",
 		"--no-renames",
-		"--name-status",
-		base,
-	})
-	if not tracked then
+		"--ignore-submodules",
+	}, { sep = "\0" })
+	if not records then
 		return nil
 	end
 
-	local untracked = run({ "-C", self.root, "ls-files", "--others", "--exclude-standard" }) or {}
-
-	local staged = path_set(run({
-		"-C",
-		self.root,
-		"diff",
-		"--ignore-submodules",
-		"--no-renames",
-		"--cached",
-		"--name-only",
-		base,
-	}))
-	local unstaged = path_set(run({
-		"-C",
-		self.root,
-		"diff",
-		"--ignore-submodules",
-		"--no-renames",
-		"--name-only",
-	}))
-
 	local entries = {}
-	local seen = {}
-
-	local function add(entry)
-		if not seen[entry.path] then
-			seen[entry.path] = true
-			table.insert(entries, entry)
+	for _, record in ipairs(records) do
+		local x, y, path = record:sub(1, 1), record:sub(2, 2), record:sub(4)
+		if path ~= "" then
+			table.insert(entries, {
+				status = entry_status(x, y),
+				path = path,
+				staged = x ~= " " and x ~= "?",
+				unstaged = y ~= " ",
+			})
 		end
-	end
-
-	for _, line in ipairs(tracked) do
-		add(parse_name_status(line, staged, unstaged))
-	end
-	for _, path in ipairs(untracked) do
-		add({ status = "A", path = path, staged = false, unstaged = true })
 	end
 	return entries
 end
