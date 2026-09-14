@@ -5,6 +5,7 @@
 ---@field prev_file string[] open the previous changed file, from either diff pane
 ---@field stage string[] stage the entry under the cursor, or unstage it if fully staged
 ---@field reset string[] discard every change to the entry under the cursor
+---@field toggle_width string[] switch the sidebar between the expanding and constant widths
 
 ---@class DiffMagikHighlights
 ---@field added string status letter for files absent from HEAD
@@ -16,10 +17,15 @@
 ---@field head_win string 'winhighlight' for the HEAD pane
 ---@field main_win string 'winhighlight' for the working-copy pane
 
+---@alias DiffMagikWidthMode
+---| "expand" # grow the sidebar to fit the widest row
+---| "constant" # keep the sidebar at its minimum width
+
 ---@class DiffMagikConfig
 ---@field keys DiffMagikKeys
 ---@field highlights DiffMagikHighlights
 ---@field fillchar string 'fillchars' diff filler, drawn over missing lines
+---@field width_mode DiffMagikWidthMode the sidebar starts in this mode
 
 ---@type DiffMagikConfig
 local defaults = {
@@ -30,6 +36,7 @@ local defaults = {
 		prev_file = { "2" },
 		stage = { "3" },
 		reset = { "X" },
+		toggle_width = { "N" },
 	},
 	highlights = {
 		added = "Added",
@@ -42,6 +49,7 @@ local defaults = {
 		main_win = "DiffDelete:DiffviewDiffDeleteDim",
 	},
 	fillchar = "╱",
+	width_mode = "expand",
 }
 
 local M = {}
@@ -57,6 +65,7 @@ function M.setup(opts)
 	options.keys = vim.tbl_extend("force", options.keys, opts.keys or {})
 	options.highlights = vim.tbl_extend("force", options.highlights, opts.highlights or {})
 	options.fillchar = opts.fillchar or options.fillchar
+	options.width_mode = opts.width_mode or options.width_mode
 
 	M.options = options
 end

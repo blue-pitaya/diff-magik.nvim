@@ -32,6 +32,7 @@ require("diff-magik").setup({
     prev_file = { "2" },
     stage = { "3" },
     reset = { "X" },
+    toggle_width = { "N" },
   },
   highlights = {
     added = "Added",
@@ -44,5 +45,10 @@ require("diff-magik").setup({
     main_win = "DiffDelete:DiffviewDiffDeleteDim",
   },
   fillchar = "╱",
+  width_mode = "expand",
 })
 ```
+
+`width_mode` controls how wide the browser sidebar is: `"expand"` grows it to fit the
+widest row (never past half the screen), `"constant"` pins it to 40 columns. Press `N`
+inside the sidebar to switch between the two.

@@ -1,4 +1,5 @@
 local DiffSplit = require("diff-magik.diffsplit")
+local config = require("diff-magik.config")
 
 local SIDEBAR_MIN_WIDTH = 40
 local SIDEBAR_MAX_RATIO = 0.5
@@ -18,13 +19,20 @@ local SIDEBAR_WIN_OPTS = {
 ---@field sidebar_buf integer|nil
 ---@field main_win integer|nil the window holding the working copy
 ---@field main_opts table<string, any>|nil `SIDEBAR_WIN_OPTS` as they were before the sidebar existed
----@field sidebar_width integer grown to fit the widest row, capped at half the screen
+---@field sidebar_width integer what the sidebar window is actually set to
+---@field content_width integer display width of the widest row rendered so far
+---@field width_mode DiffMagikWidthMode
 ---@field diffsplit DiffSplit owns the HEAD pane
 local Layout = {}
 Layout.__index = Layout
 
 function Layout.new()
-	return setmetatable({ diffsplit = DiffSplit.new(), sidebar_width = SIDEBAR_MIN_WIDTH }, Layout)
+	return setmetatable({
+		diffsplit = DiffSplit.new(),
+		sidebar_width = SIDEBAR_MIN_WIDTH,
+		content_width = SIDEBAR_MIN_WIDTH,
+		width_mode = config.options.width_mode,
+	}, Layout)
 end
 
 ---@param winid integer|nil
@@ -59,14 +67,27 @@ function Layout:has_sidebar()
 	return win_valid(self.sidebar_win)
 end
 
----@param width integer display width of the widest row
-function Layout:fit_sidebar(width)
+function Layout:apply_sidebar_width()
 	local max = math.max(SIDEBAR_MIN_WIDTH, math.floor(vim.o.columns * SIDEBAR_MAX_RATIO))
-	self.sidebar_width = math.min(math.max(width, SIDEBAR_MIN_WIDTH), max)
+	local wanted = self.width_mode == "constant" and SIDEBAR_MIN_WIDTH or self.content_width
+	self.sidebar_width = math.min(math.max(wanted, SIDEBAR_MIN_WIDTH), max)
 
 	if self:has_sidebar() then
 		vim.api.nvim_win_set_width(self.sidebar_win, self.sidebar_width)
 	end
+end
+
+---@param width integer display width of the widest row
+function Layout:fit_sidebar(width)
+	self.content_width = width
+	self:apply_sidebar_width()
+end
+
+---@return DiffMagikWidthMode
+function Layout:toggle_width_mode()
+	self.width_mode = self.width_mode == "expand" and "constant" or "expand"
+	self:apply_sidebar_width()
+	return self.width_mode
 end
 
 ---@return boolean ok
@@ -131,7 +152,7 @@ function Layout:ensure_main()
 	apply_win_opts(self.main_win, self.main_opts or {})
 
 	if anchor == self.sidebar_win then
-		vim.api.nvim_win_set_width(self.sidebar_win, self.sidebar_width)
+		self:apply_sidebar_width()
 	end
 
 	return self.main_win
@@ -145,7 +166,7 @@ function Layout:open_sidebar()
 
 	vim.cmd.vsplit({ mods = { split = "topleft" } })
 	self.sidebar_win = vim.api.nvim_get_current_win()
-	vim.api.nvim_win_set_width(self.sidebar_win, self.sidebar_width)
+	self:apply_sidebar_width()
 
 	self.sidebar_buf = vim.api.nvim_create_buf(false, true)
 	vim.api.nvim_win_set_buf(self.sidebar_win, self.sidebar_buf)

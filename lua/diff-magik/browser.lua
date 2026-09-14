@@ -19,7 +19,7 @@ function Browser.new()
 	return setmetatable({ layout = Layout.new(), diff_bufs = {} }, Browser)
 end
 
-local SIDEBAR_ACTIONS = { "open", "stage", "reset", "close" }
+local SIDEBAR_ACTIONS = { "open", "stage", "reset", "close", "toggle_width" }
 local DIFF_ACTIONS = { "next_file", "prev_file" }
 
 local DESCRIPTIONS = {
@@ -29,6 +29,7 @@ local DESCRIPTIONS = {
 	reset = "DiffMagik: discard the changes to entry",
 	next_file = "DiffMagik: next changed file",
 	prev_file = "DiffMagik: previous changed file",
+	toggle_width = "DiffMagik: toggle the sidebar width mode",
 }
 
 ---@param bufnr integer
@@ -52,6 +53,9 @@ function Browser:set_keymaps(bufnr, names)
 		end,
 		prev_file = function()
 			self:select_offset(-1)
+		end,
+		toggle_width = function()
+			self:toggle_width_mode()
 		end,
 	}
 
@@ -88,12 +92,23 @@ local function status_hl(status)
 	return hl.changed
 end
 
+local STAGE_MARKER = {
+	staged = " (S)",
+	partial = " (S*)",
+}
+
+--- Always reserved when sizing the sidebar, so staging never moves the edge.
+local STAGE_MARKER_WIDTH = 0
+for _, marker in pairs(STAGE_MARKER) do
+	STAGE_MARKER_WIDTH = math.max(STAGE_MARKER_WIDTH, vim.fn.strdisplaywidth(marker))
+end
+
 ---@param entry GitEntry
 local function stage_suffix(entry)
 	if not entry.staged then
 		return ""
 	end
-	return entry.unstaged and " (S*)" or " (S)"
+	return entry.unstaged and STAGE_MARKER.partial or STAGE_MARKER.staged
 end
 
 ---@param entry GitEntry
@@ -113,16 +128,20 @@ function Browser:render_tree()
 	self.flat = flat
 
 	local lines = {}
+	local widest = 0
 	for _, item in ipairs(flat) do
 		local indent = ("  "):rep(item.depth)
 		if item.node.is_dir then
 			local marker = item.node.expanded and "▾" or "▸"
-			table.insert(lines, ("%s%s %s/"):format(indent, marker, item.node.name))
+			local line = ("%s%s %s/"):format(indent, marker, item.node.name)
+			table.insert(lines, line)
+			widest = math.max(widest, vim.fn.strdisplaywidth(line))
 		else
-			table.insert(
-				lines,
-				("%s%s %s%s"):format(indent, item.node.entry.status, item.node.name, stage_suffix(item.node.entry))
-			)
+			local suffix = stage_suffix(item.node.entry)
+			local line = ("%s%s %s%s"):format(indent, item.node.entry.status, item.node.name, suffix)
+			table.insert(lines, line)
+			local width = vim.fn.strdisplaywidth(line) - vim.fn.strdisplaywidth(suffix) + STAGE_MARKER_WIDTH
+			widest = math.max(widest, width)
 		end
 	end
 
@@ -130,10 +149,6 @@ function Browser:render_tree()
 	vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
 	vim.bo[buf].modifiable = false
 
-	local widest = 0
-	for _, line in ipairs(lines) do
-		widest = math.max(widest, vim.fn.strdisplaywidth(line))
-	end
 	self.layout:fit_sidebar(widest)
 
 	vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
@@ -318,6 +333,11 @@ function Browser:reset_selected()
 	end
 
 	self:refresh()
+end
+
+function Browser:toggle_width_mode()
+	local mode = self.layout:toggle_width_mode()
+	vim.notify(("DiffMagik: sidebar width is %s"):format(mode))
 end
 
 function Browser:close()
