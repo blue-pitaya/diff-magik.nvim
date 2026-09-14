@@ -142,6 +142,11 @@ function Git:head_lines(rel)
 	return run({ "-C", self.root, "show", ("%s:%s"):format(self:base(), rel) })
 end
 
+---@param rel string
+function Git:index_lines(rel)
+	return run({ "-C", self.root, "show", (":%s"):format(rel) })
+end
+
 ---@class GitEntry
 ---@field status string status against HEAD
 ---@field path string
@@ -160,11 +165,12 @@ local function entry_status(x, y)
 	return y
 end
 
+---@param pathspec string[]|nil limits the scan to these paths
 ---@return GitEntry[]|nil
-function Git:get_changed_files()
+function Git:get_changed_files(pathspec)
 	-- `git diff HEAD` misses paths the index changed but the working tree did not, such as a staged
 	-- new file deleted from disk again; `git status` reports both sides of every path in one pass.
-	local records = run({
+	local args = {
 		"-C",
 		self.root,
 		"status",
@@ -173,7 +179,13 @@ function Git:get_changed_files()
 		"--untracked-files=all",
 		"--no-renames",
 		"--ignore-submodules",
-	}, { sep = "\0" })
+	}
+	if pathspec then
+		table.insert(args, "--")
+		vim.list_extend(args, pathspec)
+	end
+
+	local records = run(args, { sep = "\0" })
 	if not records then
 		return nil
 	end

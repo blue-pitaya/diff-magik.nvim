@@ -3,7 +3,7 @@ local config = require("diff-magik.config")
 local group_id = 0
 
 ---@class DiffSplit
----@field head_win integer|nil the window id of the currently open HEAD-side split
+---@field head_win integer|nil the window id of the currently open base-side split
 ---@field main_win integer|nil the window holding the working copy
 ---@field main_buf integer|nil the buffer the HEAD-side split was built for
 ---@field main_state { fillchars: string, winhighlight: string }|nil
@@ -131,26 +131,44 @@ function DiffSplit:open_against_head(repo, rel)
 	local bufnr = vim.api.nvim_get_current_buf()
 
 	---@type string[]
-	local head_content = {}
+	local base_content = {}
+	local base_label = "HEAD"
 
-	if repo:exists_in_head(rel) then
-		local changed = repo:diff_name_only(rel)
-		if not changed then
-			vim.notify("DiffMagik: failed to run git diff", vim.log.levels.ERROR)
+	local entries = repo:get_changed_files({ rel })
+	if not entries then
+		vim.notify("DiffMagik: failed to run git status", vim.log.levels.ERROR)
+		return
+	end
+	if #entries == 0 then
+		vim.notify(("DiffMagik: no changes in '%s'"):format(rel), vim.log.levels.ERROR)
+		return
+	end
+
+	local worktree_changed = repo:diff_name_only(rel)
+	if not worktree_changed then
+		vim.notify("DiffMagik: failed to run git diff", vim.log.levels.ERROR)
+		return
+	end
+
+	-- The working tree can match HEAD while the index does not, and then HEAD is the one side that
+	-- no longer holds the staged change; diffing against it would render an empty diff.
+	if #worktree_changed == 0 and entries[1].staged then
+		local lines = repo:index_lines(rel)
+		if not lines then
+			vim.notify("DiffMagik: failed to read indexed version of file", vim.log.levels.ERROR)
 			return
 		end
-		if #changed == 0 then
-			vim.notify(("DiffMagik: no changes in '%s'"):format(rel), vim.log.levels.ERROR)
-			return
-		end
 
+		base_content = lines
+		base_label = "INDEX"
+	elseif repo:exists_in_head(rel) then
 		local lines = repo:head_lines(rel)
 		if not lines then
 			vim.notify("DiffMagik: failed to read HEAD version of file", vim.log.levels.ERROR)
 			return
 		end
 
-		head_content = lines
+		base_content = lines
 	end
 
 	if win_valid(self.head_win) then
@@ -170,8 +188,8 @@ function DiffSplit:open_against_head(repo, rel)
 	vim.cmd.vsplit()
 	self.head_win = vim.api.nvim_get_current_win()
 	local head_buf = vim.api.nvim_create_buf(false, true)
-	vim.api.nvim_buf_set_lines(head_buf, 0, -1, false, head_content)
-	vim.api.nvim_buf_set_name(head_buf, ("diffmagik://%s@HEAD"):format(rel))
+	vim.api.nvim_buf_set_lines(head_buf, 0, -1, false, base_content)
+	vim.api.nvim_buf_set_name(head_buf, ("diffmagik://%s@%s"):format(rel, base_label))
 	vim.bo[head_buf].buftype = "nofile"
 	vim.bo[head_buf].bufhidden = "wipe"
 	vim.bo[head_buf].swapfile = false
