@@ -130,6 +130,12 @@ function Browser:render_tree()
 	vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
 	vim.bo[buf].modifiable = false
 
+	local widest = 0
+	for _, line in ipairs(lines) do
+		widest = math.max(widest, vim.fn.strdisplaywidth(line))
+	end
+	self.layout:fit_sidebar(widest)
+
 	vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
 	for i, item in ipairs(flat) do
 		if item.node.is_dir then
