@@ -124,51 +124,31 @@ function DiffSplit:sync()
 	end
 end
 
+--- Drops the base pane and leaves the working copy the way it was found.
+function DiffSplit:close()
+	diff_off(self.main_win)
+	self:restore_main_state()
+
+	if win_valid(self.head_win) then
+		vim.api.nvim_win_close(self.head_win, true)
+	end
+
+	self.head_win = nil
+	self.main_win = nil
+	self.main_buf = nil
+	self.main_state = nil
+end
+
 ---@param repo Git
 ---@param rel string path to the file, relative to `repo.root`
 function DiffSplit:open_against_head(repo, rel)
 	local main_win = vim.api.nvim_get_current_win()
 	local bufnr = vim.api.nvim_get_current_buf()
 
-	---@type string[]
-	local base_content = {}
-	local base_label = "HEAD"
-
-	local entries = repo:get_changed_files({ rel })
-	if not entries then
-		vim.notify("DiffMagik: failed to run git status", vim.log.levels.ERROR)
+	local base_content, base_label, err = repo:base_lines(rel)
+	if not base_content then
+		vim.notify("DiffMagik: " .. err, vim.log.levels.ERROR)
 		return
-	end
-	if #entries == 0 then
-		vim.notify(("DiffMagik: no changes in '%s'"):format(rel), vim.log.levels.ERROR)
-		return
-	end
-
-	local worktree_changed = repo:diff_name_only(rel)
-	if not worktree_changed then
-		vim.notify("DiffMagik: failed to run git diff", vim.log.levels.ERROR)
-		return
-	end
-
-	-- The working tree can match HEAD while the index does not, and then HEAD is the one side that
-	-- no longer holds the staged change; diffing against it would render an empty diff.
-	if #worktree_changed == 0 and entries[1].staged then
-		local lines = repo:index_lines(rel)
-		if not lines then
-			vim.notify("DiffMagik: failed to read indexed version of file", vim.log.levels.ERROR)
-			return
-		end
-
-		base_content = lines
-		base_label = "INDEX"
-	elseif repo:exists_in_head(rel) then
-		local lines = repo:head_lines(rel)
-		if not lines then
-			vim.notify("DiffMagik: failed to read HEAD version of file", vim.log.levels.ERROR)
-			return
-		end
-
-		base_content = lines
 	end
 
 	if win_valid(self.head_win) then

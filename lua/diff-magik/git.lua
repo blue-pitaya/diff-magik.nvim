@@ -147,6 +147,45 @@ function Git:index_lines(rel)
 	return run({ "-C", self.root, "show", (":%s"):format(rel) })
 end
 
+---@param rel string path to the file, relative to `self.root`
+---@return string[]|nil lines the version to diff against, empty when the file is not in the base
+---@return string|nil label the revision the lines came from
+---@return string|nil err
+function Git:base_lines(rel)
+	local entries = self:get_changed_files({ rel })
+	if not entries then
+		return nil, nil, "failed to run git status"
+	end
+	if #entries == 0 then
+		return nil, nil, ("no changes in '%s'"):format(rel)
+	end
+
+	local worktree_changed = self:diff_name_only(rel)
+	if not worktree_changed then
+		return nil, nil, "failed to run git diff"
+	end
+
+	-- The working tree can match HEAD while the index does not, and then HEAD is the one side that
+	-- no longer holds the staged change; diffing against it would render an empty diff.
+	if #worktree_changed == 0 and entries[1].staged then
+		local lines = self:index_lines(rel)
+		if not lines then
+			return nil, nil, "failed to read indexed version of file"
+		end
+		return lines, "INDEX"
+	end
+
+	if self:exists_in_head(rel) then
+		local lines = self:head_lines(rel)
+		if not lines then
+			return nil, nil, "failed to read HEAD version of file"
+		end
+		return lines, "HEAD"
+	end
+
+	return {}, "HEAD"
+end
+
 ---@class GitEntry
 ---@field status string status against HEAD
 ---@field path string

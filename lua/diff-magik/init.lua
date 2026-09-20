@@ -36,8 +36,8 @@ end
 function M.setup(opts)
 	config.setup(opts)
 
-	local browser = Browser.new()
 	local diffsplit = DiffSplit.new()
+	local browser = Browser.new()
 
 	vim.api.nvim_create_user_command("DiffMagikOpen", function()
 		local repo, rel = current_file()
@@ -67,6 +67,12 @@ function M.setup(opts)
 		browser:open()
 	end, {
 		desc = "Open a sidebar browser of all changed files vs git HEAD",
+	})
+
+	vim.api.nvim_create_user_command("DiffMagikBrowserDiffToggle", function()
+		browser:toggle_diff_style()
+	end, {
+		desc = "Switch the browser between the two-pane and single-pane diff styles",
 	})
 end
 

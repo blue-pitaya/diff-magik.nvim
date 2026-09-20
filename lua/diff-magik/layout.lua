@@ -1,4 +1,5 @@
 local DiffSplit = require("diff-magik.diffsplit")
+local FileDiff = require("diff-magik.filediff")
 local config = require("diff-magik.config")
 
 local SIDEBAR_MIN_WIDTH = 40
@@ -22,16 +23,20 @@ local SIDEBAR_WIN_OPTS = {
 ---@field sidebar_width integer what the sidebar window is actually set to
 ---@field content_width integer display width of the widest row rendered so far
 ---@field width_mode DiffMagikWidthMode
+---@field diff_style DiffMagikDiffStyle
 ---@field diffsplit DiffSplit owns the HEAD pane
+---@field filediff FileDiff draws the single-pane diff
 local Layout = {}
 Layout.__index = Layout
 
 function Layout.new()
 	return setmetatable({
 		diffsplit = DiffSplit.new(),
+		filediff = FileDiff.new(),
 		sidebar_width = SIDEBAR_MIN_WIDTH,
 		content_width = SIDEBAR_MIN_WIDTH,
 		width_mode = config.options.width_mode,
+		diff_style = config.options.diff_style,
 	}, Layout)
 end
 
@@ -88,6 +93,19 @@ function Layout:toggle_width_mode()
 	self.width_mode = self.width_mode == "expand" and "constant" or "expand"
 	self:apply_sidebar_width()
 	return self.width_mode
+end
+
+---@return DiffMagikDiffStyle
+function Layout:toggle_diff_style()
+	self.diff_style = self.diff_style == "split" and "inline" or "split"
+
+	if self.diff_style == "inline" then
+		self.diffsplit:close()
+	else
+		self.filediff:clear()
+	end
+
+	return self.diff_style
 end
 
 ---@return boolean ok
@@ -195,9 +213,17 @@ function Layout:open_file(repo, rel)
 		return nil
 	end
 
+	local bufnr = vim.api.nvim_win_get_buf(main_win)
+
+	if self.diff_style == "inline" then
+		self.filediff:attach(repo, rel, bufnr)
+		return { bufnr }
+	end
+
+	self.filediff:detach(bufnr)
 	self.diffsplit:open_against_head(repo, rel)
 
-	local bufs = { vim.api.nvim_win_get_buf(main_win) }
+	local bufs = { bufnr }
 	if win_valid(self.diffsplit.head_win) then
 		table.insert(bufs, vim.api.nvim_win_get_buf(self.diffsplit.head_win))
 	end

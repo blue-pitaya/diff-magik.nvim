@@ -335,6 +335,25 @@ function Browser:reset_selected()
 	self:refresh()
 end
 
+--- Redraws whatever file is open in the new style, without stealing the cursor from wherever the
+--- command was run.
+function Browser:toggle_diff_style()
+	local style = self.layout:toggle_diff_style()
+	vim.notify(("DiffMagik: browser diff style is %s"):format(style))
+
+	local index = self:current_index()
+	local item = index and self.flat[index]
+	if not item then
+		return
+	end
+
+	local from = vim.api.nvim_get_current_win()
+	self:open_entry(item.node.entry)
+	if vim.api.nvim_win_is_valid(from) then
+		vim.api.nvim_set_current_win(from)
+	end
+end
+
 function Browser:toggle_width_mode()
 	local mode = self.layout:toggle_width_mode()
 	vim.notify(("DiffMagik: sidebar width is %s"):format(mode))

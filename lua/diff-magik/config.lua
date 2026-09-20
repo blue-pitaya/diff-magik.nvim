@@ -16,16 +16,24 @@
 ---@field staged_dirty string the "(S*)" marker
 ---@field head_win string 'winhighlight' for the HEAD pane
 ---@field main_win string 'winhighlight' for the working-copy pane
+---@field file_added string added lines in the in-file diff, `DiffAdd`'s colors by default
+---@field file_deleted string deleted lines in the in-file diff, `DiffDelete`'s colors by default
 
 ---@alias DiffMagikWidthMode
 ---| "expand" # grow the sidebar to fit the widest row
 ---| "constant" # keep the sidebar at its minimum width
+
+---@alias DiffMagikDiffStyle
+---| "split" # the working copy and the base side by side, in two panes
+---| "inline" # one pane, with the deleted lines drawn above the added ones
 
 ---@class DiffMagikConfig
 ---@field keys DiffMagikKeys
 ---@field highlights DiffMagikHighlights
 ---@field fillchar string 'fillchars' diff filler, drawn over missing lines
 ---@field width_mode DiffMagikWidthMode the sidebar starts in this mode
+---@field diff_style DiffMagikDiffStyle the browser starts in this style
+---@field fold_context integer untouched lines kept around each hunk before the browser folds the rest
 
 ---@type DiffMagikConfig
 local defaults = {
@@ -47,9 +55,13 @@ local defaults = {
 		staged_dirty = "DiagnosticWarn",
 		head_win = "DiffAdd:DiffDelete,DiffDelete:DiffviewDiffDeleteDim",
 		main_win = "DiffDelete:DiffviewDiffDeleteDim",
+		file_added = "DiffMagikFileAdded",
+		file_deleted = "DiffMagikFileDeleted",
 	},
 	fillchar = "╱",
 	width_mode = "expand",
+	diff_style = "split",
+	fold_context = 3,
 }
 
 local M = {}
@@ -66,6 +78,8 @@ function M.setup(opts)
 	options.highlights = vim.tbl_extend("force", options.highlights, opts.highlights or {})
 	options.fillchar = opts.fillchar or options.fillchar
 	options.width_mode = opts.width_mode or options.width_mode
+	options.diff_style = opts.diff_style or options.diff_style
+	options.fold_context = opts.fold_context or options.fold_context
 
 	M.options = options
 end
