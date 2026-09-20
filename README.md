@@ -9,7 +9,12 @@ lazy.nvim
 ```lua
 {
   "yourname/nvim-diff-magik",
-  cmd = { "DiffMagikOpen", "DiffMagikBrowser", "DiffMagikBrowserDiffToggle" },
+  cmd = {
+    "DiffMagikOpen",
+    "DiffMagikBrowser",
+    "DiffMagikBrowserDiffToggle",
+    "DiffMagikBrowserSizeToggle",
+  },
   config = function()
     require("diff-magik").setup()
   end,
@@ -21,6 +26,7 @@ lazy.nvim
 - `:DiffMagikOpen` 
 - `:DiffMagikBrowser`
 - `:DiffMagikBrowserDiffToggle`
+- `:DiffMagikBrowserSizeToggle`
 
 ## Default config
 
@@ -77,4 +83,5 @@ the style back hands the window's fold settings over exactly as they were.
 
 `width_mode` controls how wide the browser sidebar is: `"expand"` grows it to fit the
 widest row (never past half the screen), `"constant"` pins it to 40 columns. Press `N`
-inside the sidebar to switch between the two.
+inside the sidebar, or run `:DiffMagikBrowserSizeToggle` from anywhere, to switch between
+the two.

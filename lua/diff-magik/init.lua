@@ -74,6 +74,12 @@ function M.setup(opts)
 	end, {
 		desc = "Switch the browser between the two-pane and single-pane diff styles",
 	})
+
+	vim.api.nvim_create_user_command("DiffMagikBrowserSizeToggle", function()
+		browser:toggle_width_mode()
+	end, {
+		desc = "Switch the browser sidebar between the expanding and constant widths",
+	})
 end
 
 return M
