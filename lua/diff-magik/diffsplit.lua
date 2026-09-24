@@ -1,4 +1,7 @@
 local config = require("diff-magik.config")
+local util = require("diff-magik.util")
+
+local win_valid = util.win_valid
 
 local group_id = 0
 
@@ -6,15 +9,11 @@ local group_id = 0
 ---@field head_win integer|nil the window id of the currently open base-side split
 ---@field main_win integer|nil the window holding the working copy
 ---@field main_buf integer|nil the buffer the HEAD-side split was built for
----@field main_state { fillchars: string, winhighlight: string }|nil
+---@field main_state { fillchars: string, winhighlight: string, foldcolumn: string }|nil
 ---@field augroup integer
+---@field opening boolean|nil true while a diff is being set up
 local DiffSplit = {}
 DiffSplit.__index = DiffSplit
-
----@param winid integer|nil
-local function win_valid(winid)
-	return winid ~= nil and vim.api.nvim_win_is_valid(winid)
-end
 
 ---@param winid integer
 ---@param char string
@@ -34,7 +33,6 @@ local function diff_on(winid, winhighlight)
 		return
 	end
 
-	-- `:diffthis` forces 'wrap' off unless 'diffopt' carries "followwrap", which is a global opt-in.
 	local wrap = vim.wo[winid].wrap
 
 	set_diff_fillchar(winid, config.options.fillchar)
@@ -44,7 +42,6 @@ local function diff_on(winid, winhighlight)
 	end)
 	vim.wo[winid].wrap = wrap
 
-	-- A pane with nothing to scroll through would drag its partner back to the top on every entry.
 	if vim.api.nvim_buf_line_count(vim.api.nvim_win_get_buf(winid)) <= 1 then
 		vim.wo[winid].scrollbind = false
 		vim.wo[winid].cursorbind = false
@@ -95,6 +92,7 @@ function DiffSplit:save_main_state(winid)
 	self.main_state = {
 		fillchars = vim.api.nvim_get_option_value("fillchars", { scope = "local", win = winid }),
 		winhighlight = vim.wo[winid].winhighlight,
+		foldcolumn = vim.wo[winid].foldcolumn,
 	}
 end
 
@@ -107,6 +105,7 @@ function DiffSplit:restore_main_state()
 
 	vim.api.nvim_set_option_value("fillchars", state.fillchars, { scope = "local", win = self.main_win })
 	vim.wo[self.main_win].winhighlight = state.winhighlight
+	vim.wo[self.main_win].foldcolumn = state.foldcolumn
 end
 
 ---@return boolean
@@ -116,9 +115,17 @@ function DiffSplit:showing_main_buf()
 		and vim.api.nvim_win_get_buf(self.main_win) == self.main_buf
 end
 
---- Suspends the diff while the main window is showing some other buffer, and rebuilds it on return.
 function DiffSplit:sync()
+	if self.opening then
+		return
+	end
+
 	if not win_valid(self.main_win) or not self.main_buf then
+		return
+	end
+
+	if not win_valid(self.head_win) then
+		self:close()
 		return
 	end
 
@@ -134,7 +141,6 @@ function DiffSplit:sync()
 	end
 end
 
---- Drops the base pane and leaves the working copy the way it was found.
 function DiffSplit:close()
 	diff_off(self.main_win)
 	self:restore_main_state()
@@ -161,6 +167,8 @@ function DiffSplit:open_against_head(repo, rel)
 		return
 	end
 
+	self.opening = true
+
 	if win_valid(self.head_win) then
 		vim.api.nvim_win_close(self.head_win, true)
 	end
@@ -172,25 +180,20 @@ function DiffSplit:open_against_head(repo, rel)
 	self.main_buf = bufnr
 	self:save_main_state(main_win)
 
-	vim.b[bufnr].diffmagik_root = repo.root
-	vim.b[bufnr].diffmagik_path = rel
+	util.tag_buffer(bufnr, repo.root, rel)
 
 	vim.cmd.vsplit()
 	self.head_win = vim.api.nvim_get_current_win()
-	local head_buf = vim.api.nvim_create_buf(false, true)
+	local head_buf = util.scratch_buf(("diffmagik://%s@%s"):format(rel, base_label))
 	vim.api.nvim_buf_set_lines(head_buf, 0, -1, false, base_content)
-	vim.api.nvim_buf_set_name(head_buf, ("diffmagik://%s@%s"):format(rel, base_label))
-	vim.bo[head_buf].buftype = "nofile"
-	vim.bo[head_buf].bufhidden = "wipe"
-	vim.bo[head_buf].swapfile = false
 	vim.bo[head_buf].filetype = vim.bo[bufnr].filetype
 	vim.bo[head_buf].modifiable = false
-	vim.b[head_buf].diffmagik_root = repo.root
-	vim.b[head_buf].diffmagik_path = rel
+	util.tag_buffer(head_buf, repo.root, rel)
 
 	vim.api.nvim_win_set_buf(self.head_win, head_buf)
 
 	vim.api.nvim_set_current_win(main_win)
+	self.opening = false
 	self:sync()
 end
 

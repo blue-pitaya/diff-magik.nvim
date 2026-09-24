@@ -1,9 +1,8 @@
 local Git = require("diff-magik.git")
 local TreeNode = require("diff-magik.tree")
 local Layout = require("diff-magik.layout")
+local render = require("diff-magik.render")
 local config = require("diff-magik.config")
-
-local ns = vim.api.nvim_create_namespace("diff-magik")
 
 ---@class Browser
 ---@field layout Layout
@@ -19,53 +18,37 @@ function Browser.new()
 	return setmetatable({ layout = Layout.new(), diff_bufs = {} }, Browser)
 end
 
+---@class BrowserAction
+---@field desc string
+---@field run fun(browser: Browser)
+
+---@type table<string, BrowserAction>
+local ACTIONS = {
+	open = { desc = "DiffMagik: open entry", run = function(b) b:open_selected() end },
+	close = { desc = "DiffMagik: close browser", run = function(b) b:close() end },
+	stage = { desc = "DiffMagik: stage or unstage entry", run = function(b) b:toggle_stage_selected() end },
+	reset = { desc = "DiffMagik: discard the changes to entry", run = function(b) b:reset_selected() end },
+	next_file = { desc = "DiffMagik: next changed file", run = function(b) b:select_offset(1) end },
+	prev_file = { desc = "DiffMagik: previous changed file", run = function(b) b:select_offset(-1) end },
+	toggle_width = { desc = "DiffMagik: toggle the sidebar width mode", run = function(b) b:toggle_width_mode() end },
+}
+
 local SIDEBAR_ACTIONS = { "open", "stage", "reset", "close", "toggle_width" }
 local DIFF_ACTIONS = { "next_file", "prev_file" }
-
-local DESCRIPTIONS = {
-	open = "DiffMagik: open entry",
-	close = "DiffMagik: close browser",
-	stage = "DiffMagik: stage or unstage entry",
-	reset = "DiffMagik: discard the changes to entry",
-	next_file = "DiffMagik: next changed file",
-	prev_file = "DiffMagik: previous changed file",
-	toggle_width = "DiffMagik: toggle the sidebar width mode",
-}
 
 ---@param bufnr integer
 ---@param names string[]
 function Browser:set_keymaps(bufnr, names)
-	local handlers = {
-		open = function()
-			self:open_selected()
-		end,
-		close = function()
-			self:close()
-		end,
-		stage = function()
-			self:toggle_stage_selected()
-		end,
-		reset = function()
-			self:reset_selected()
-		end,
-		next_file = function()
-			self:select_offset(1)
-		end,
-		prev_file = function()
-			self:select_offset(-1)
-		end,
-		toggle_width = function()
-			self:toggle_width_mode()
-		end,
-	}
-
 	for _, name in ipairs(names) do
+		local action = ACTIONS[name]
 		for _, key in ipairs(config.options.keys[name]) do
-			vim.keymap.set("n", key, handlers[name], {
+			vim.keymap.set("n", key, function()
+				action.run(self)
+			end, {
 				buffer = bufnr,
 				nowait = true,
 				silent = true,
-				desc = DESCRIPTIONS[name],
+				desc = action.desc,
 			})
 		end
 	end
@@ -81,42 +64,6 @@ local function del_keymaps(bufnr, names)
 	end
 end
 
----@param status string
-local function status_hl(status)
-	local hl = config.options.highlights
-	if status == "A" then
-		return hl.added
-	elseif status == "D" then
-		return hl.removed
-	end
-	return hl.changed
-end
-
-local STAGE_MARKER = {
-	staged = " (S)",
-	partial = " (S*)",
-}
-
---- Always reserved when sizing the sidebar, so staging never moves the edge.
-local STAGE_MARKER_WIDTH = 0
-for _, marker in pairs(STAGE_MARKER) do
-	STAGE_MARKER_WIDTH = math.max(STAGE_MARKER_WIDTH, vim.fn.strdisplaywidth(marker))
-end
-
----@param entry GitEntry
-local function stage_suffix(entry)
-	if not entry.staged then
-		return ""
-	end
-	return entry.unstaged and STAGE_MARKER.partial or STAGE_MARKER.staged
-end
-
----@param entry GitEntry
-local function stage_hl(entry)
-	local hl = config.options.highlights
-	return entry.unstaged and hl.staged_dirty or hl.staged
-end
-
 function Browser:render_tree()
 	local buf = self.layout.sidebar_buf
 	if not buf or not vim.api.nvim_buf_is_valid(buf) then
@@ -127,53 +74,7 @@ function Browser:render_tree()
 	self.tree:flatten(0, flat)
 	self.flat = flat
 
-	local lines = {}
-	local widest = 0
-	for _, item in ipairs(flat) do
-		local indent = ("  "):rep(item.depth)
-		if item.node.is_dir then
-			local marker = item.node.expanded and "▾" or "▸"
-			local line = ("%s%s %s/"):format(indent, marker, item.node.name)
-			table.insert(lines, line)
-			widest = math.max(widest, vim.fn.strdisplaywidth(line))
-		else
-			local suffix = stage_suffix(item.node.entry)
-			local line = ("%s%s %s%s"):format(indent, item.node.entry.status, item.node.name, suffix)
-			table.insert(lines, line)
-			local width = vim.fn.strdisplaywidth(line) - vim.fn.strdisplaywidth(suffix) + STAGE_MARKER_WIDTH
-			widest = math.max(widest, width)
-		end
-	end
-
-	vim.bo[buf].modifiable = true
-	vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-	vim.bo[buf].modifiable = false
-
-	self.layout:fit_sidebar(widest)
-
-	vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
-	for i, item in ipairs(flat) do
-		if item.node.is_dir then
-			vim.api.nvim_buf_set_extmark(buf, ns, i - 1, 0, {
-				line_hl_group = config.options.highlights.directory,
-			})
-		else
-			local col = #("  "):rep(item.depth)
-			vim.api.nvim_buf_set_extmark(buf, ns, i - 1, col, {
-				end_col = col + 1,
-				hl_group = status_hl(item.node.entry.status),
-			})
-
-			local suffix = stage_suffix(item.node.entry)
-			if suffix ~= "" then
-				local end_col = #lines[i]
-				vim.api.nvim_buf_set_extmark(buf, ns, i - 1, end_col - #suffix + 1, {
-					end_col = end_col,
-					hl_group = stage_hl(item.node.entry),
-				})
-			end
-		end
-	end
+	self.layout:fit_sidebar(render(buf, flat))
 end
 
 function Browser:refresh()
@@ -335,8 +236,6 @@ function Browser:reset_selected()
 	self:refresh()
 end
 
---- Redraws whatever file is open in the new style, without stealing the cursor from wherever the
---- command was run.
 function Browser:toggle_diff_style()
 	local style = self.layout:toggle_diff_style()
 	vim.notify(("DiffMagik: browser diff style is %s"):format(style))

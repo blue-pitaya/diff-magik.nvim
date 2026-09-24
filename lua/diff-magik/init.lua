@@ -1,14 +1,16 @@
 local Git = require("diff-magik.git")
 local DiffSplit = require("diff-magik.diffsplit")
 local Browser = require("diff-magik.browser")
+local util = require("diff-magik.util")
 local config = require("diff-magik.config")
 
 local M = {}
 
 ---@return Git|nil, string|nil
 local function current_file()
-	if vim.b.diffmagik_root and vim.b.diffmagik_path then
-		return Git.from_root(vim.b.diffmagik_root), vim.b.diffmagik_path
+	local root, rel = util.buffer_target(vim.api.nvim_get_current_buf())
+	if root and rel then
+		return Git.from_root(root), rel
 	end
 
 	local filepath = vim.api.nvim_buf_get_name(0)

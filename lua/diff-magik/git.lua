@@ -25,7 +25,6 @@ local function run(args, opts)
 	return lines
 end
 
---- `git -C` fails outright on a missing directory, which a deleted file's parent may well be.
 ---@param dir string
 ---@return string|nil dir the closest ancestor that still exists on disk
 local function existing_dir(dir)
@@ -165,8 +164,6 @@ function Git:base_lines(rel)
 		return nil, nil, "failed to run git diff"
 	end
 
-	-- The working tree can match HEAD while the index does not, and then HEAD is the one side that
-	-- no longer holds the staged change; diffing against it would render an empty diff.
 	if #worktree_changed == 0 and entries[1].staged then
 		local lines = self:index_lines(rel)
 		if not lines then
@@ -207,8 +204,6 @@ end
 ---@param pathspec string[]|nil limits the scan to these paths
 ---@return GitEntry[]|nil
 function Git:get_changed_files(pathspec)
-	-- `git diff HEAD` misses paths the index changed but the working tree did not, such as a staged
-	-- new file deleted from disk again; `git status` reports both sides of every path in one pass.
 	local args = {
 		"-C",
 		self.root,

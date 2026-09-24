@@ -1,6 +1,10 @@
 local DiffSplit = require("diff-magik.diffsplit")
 local FileDiff = require("diff-magik.filediff")
+local util = require("diff-magik.util")
 local config = require("diff-magik.config")
+
+local win_valid = util.win_valid
+local is_floating = util.is_floating
 
 local SIDEBAR_MIN_WIDTH = 40
 local SIDEBAR_MAX_RATIO = 0.5
@@ -38,16 +42,6 @@ function Layout.new()
 		width_mode = config.options.width_mode,
 		diff_style = config.options.diff_style,
 	}, Layout)
-end
-
----@param winid integer|nil
-local function win_valid(winid)
-	return winid ~= nil and vim.api.nvim_win_is_valid(winid)
-end
-
----@param winid integer
-local function is_floating(winid)
-	return vim.api.nvim_win_get_config(winid).relative ~= ""
 end
 
 ---@param winid integer
@@ -186,13 +180,8 @@ function Layout:open_sidebar()
 	self.sidebar_win = vim.api.nvim_get_current_win()
 	self:apply_sidebar_width()
 
-	self.sidebar_buf = vim.api.nvim_create_buf(false, true)
+	self.sidebar_buf = util.scratch_buf("diffmagik://changes")
 	vim.api.nvim_win_set_buf(self.sidebar_win, self.sidebar_buf)
-
-	vim.api.nvim_buf_set_name(self.sidebar_buf, "diffmagik://changes")
-	vim.bo[self.sidebar_buf].buftype = "nofile"
-	vim.bo[self.sidebar_buf].bufhidden = "wipe"
-	vim.bo[self.sidebar_buf].swapfile = false
 	vim.bo[self.sidebar_buf].filetype = "diffmagik"
 
 	apply_win_opts(self.sidebar_win, SIDEBAR_WIN_OPTS)
@@ -230,7 +219,6 @@ function Layout:open_file(repo, rel)
 	return bufs
 end
 
---- Drops whatever the working-copy pane holds in favour of what is on disk now.
 function Layout:reload_main()
 	if not win_valid(self.main_win) then
 		return

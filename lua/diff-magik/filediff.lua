@@ -1,4 +1,5 @@
 local config = require("diff-magik.config")
+local util = require("diff-magik.util")
 
 local ns = vim.api.nvim_create_namespace("diff-magik.filediff")
 local group_id = 0
@@ -8,10 +9,6 @@ local COPIED_HL = {
 	DiffMagikFileDeleted = "DiffDelete",
 }
 
---- 'winhighlight' remaps `DiffDelete` to the dim filler colors in every pane this plugin opens, and a
---- virtual line drawn in such a window picks the remap up. Copying the colors out into groups of our
---- own — the same trick diffview.nvim uses for `DiffviewDiffAddAsDelete` — keeps deleted lines red
---- wherever they end up being drawn.
 local function define_hl()
 	for name, source in pairs(COPIED_HL) do
 		vim.api.nvim_set_hl(0, name, vim.api.nvim_get_hl(0, { name = source, link = false }))
@@ -25,8 +22,6 @@ local FOLD_OPTS = {
 	foldlevel = 0,
 }
 
---- Lines worth showing, keyed by buffer then line number, read back by `foldexpr` — which Vim calls
---- for every line of the buffer and so cannot afford to diff anything itself.
 ---@type table<integer, table<integer, boolean>|nil>
 local unfolded = {}
 
@@ -42,7 +37,6 @@ local unfolded = {}
 local FileDiff = {}
 FileDiff.__index = FileDiff
 
---- Folds everything that is not a hunk or one of its context lines.
 ---@param lnum integer
 ---@return string
 function FileDiff.foldexpr(lnum)
@@ -61,7 +55,6 @@ local function as_text(lines)
 	return table.concat(lines, "\n") .. "\n"
 end
 
---- Virtual lines are drawn as-is, so a tab would land on the wrong column.
 ---@param line string
 ---@param tabstop integer
 local function expand_tabs(line, tabstop)
@@ -88,7 +81,6 @@ local function mark_unfolded(bufnr, hunks)
 
 	for _, hunk in ipairs(hunks) do
 		local start_b, count_b = hunk[3], hunk[4]
-		-- A deleted-only hunk hangs its virtual lines off a real line, and a closed fold hides those.
 		local first = math.max(start_b, 1)
 		local last = count_b > 0 and start_b + count_b - 1 or first
 
@@ -130,8 +122,6 @@ function FileDiff.new()
 		desc = "DiffMagik: re-copy the diff colors the in-file diff draws with",
 	})
 
-	-- `TextChangedI` is left out on purpose: rediffing the whole file on every keystroke is not worth
-	-- what it buys, and `InsertLeave` catches up as soon as the edit is over.
 	vim.api.nvim_create_autocmd({ "TextChanged", "InsertLeave", "BufReadPost" }, {
 		group = self.augroup,
 		callback = function(args)
@@ -140,7 +130,6 @@ function FileDiff.new()
 		desc = "DiffMagik: keep the in-file diff in sync with the buffer",
 	})
 
-	-- Deleted lines are padded to the text area, so a resize leaves them the wrong length.
 	vim.api.nvim_create_autocmd({ "WinResized", "VimResized" }, {
 		group = self.augroup,
 		callback = function()
@@ -212,8 +201,6 @@ function FileDiff:render(bufnr)
 				table.insert(virt_lines, { { text, hl.file_deleted } })
 			end
 
-			-- A hunk with no lines on the working-copy side anchors *after* line `start_b`, which is
-			-- line 0 when the deletion sits at the very top of the file.
 			local above = count_b > 0 or start_b == 0
 			vim.api.nvim_buf_set_extmark(bufnr, ns, math.max(start_b - 1, 0), 0, {
 				virt_lines = virt_lines,
@@ -230,8 +217,6 @@ end
 ---@param force boolean recompute the folds of a window that is already set up
 function FileDiff:fold_windows(bufnr, force)
 	for _, winid in ipairs(vim.fn.win_findbuf(bufnr)) do
-		-- Setting the options up is a once-per-window job: doing it on every redraw would slam shut
-		-- every fold the reader had opened since.
 		if not self.win_opts[winid] then
 			local saved = {}
 			for name in pairs(FOLD_OPTS) do
@@ -243,8 +228,6 @@ function FileDiff:fold_windows(bufnr, force)
 				vim.wo[winid][name] = value
 			end
 		elseif force then
-			-- `foldexpr` reads a table Vim knows nothing about, so a new file in an already folded
-			-- window has to be told that its folds are stale.
 			vim.api.nvim_win_call(winid, function()
 				vim.cmd("normal! zX")
 			end)
@@ -314,8 +297,7 @@ function FileDiff:attach(repo, rel, bufnr)
 		label = label,
 	}
 
-	vim.b[bufnr].diffmagik_root = repo.root
-	vim.b[bufnr].diffmagik_path = rel
+	util.tag_buffer(bufnr, repo.root, rel)
 
 	self:render(bufnr)
 	self:fold_windows(bufnr, true)
