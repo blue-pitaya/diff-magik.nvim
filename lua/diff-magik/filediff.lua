@@ -159,6 +159,19 @@ function FileDiff.new()
 		desc = "DiffMagik: drop the in-file diff of a closed buffer",
 	})
 
+	vim.api.nvim_create_autocmd("LspAttach", {
+		group = self.augroup,
+		callback = function(args)
+			local bufnr = args.buf
+			vim.schedule(function()
+				if self.active[bufnr] then
+					self:refold_windows(bufnr)
+				end
+			end)
+		end,
+		desc = "DiffMagik: keep the hunk folds an attaching LSP would take over",
+	})
+
 	return self
 end
 
@@ -235,6 +248,18 @@ function FileDiff:fold_windows(bufnr, force)
 			vim.api.nvim_win_call(winid, function()
 				vim.cmd("normal! zX")
 			end)
+		end
+	end
+end
+
+---@param bufnr integer
+function FileDiff:refold_windows(bufnr)
+	for _, winid in ipairs(vim.fn.win_findbuf(bufnr)) do
+		if self.win_opts[winid] and vim.api.nvim_win_is_valid(winid) then
+			if vim.wo[winid].foldmethod ~= FOLD_OPTS.foldmethod or vim.wo[winid].foldexpr ~= FOLD_OPTS.foldexpr then
+				vim.wo[winid][0].foldmethod = FOLD_OPTS.foldmethod
+				vim.wo[winid][0].foldexpr = FOLD_OPTS.foldexpr
+			end
 		end
 	end
 end

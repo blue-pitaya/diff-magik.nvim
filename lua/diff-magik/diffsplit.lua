@@ -77,6 +77,16 @@ function DiffSplit.new()
 		desc = "DiffMagik: keep diff mode bound to the file the HEAD pane was opened for",
 	})
 
+	vim.api.nvim_create_autocmd("LspAttach", {
+		group = self.augroup,
+		callback = function()
+			vim.schedule(function()
+				self:sync()
+			end)
+		end,
+		desc = "DiffMagik: restore the diff folds an attaching LSP would take over",
+	})
+
 	return self
 end
 
