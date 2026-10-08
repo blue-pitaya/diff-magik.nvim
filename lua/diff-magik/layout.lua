@@ -237,4 +237,36 @@ function Layout:close()
 	self.sidebar_buf = nil
 end
 
+---@param winid integer
+---@return boolean
+function Layout:in_split_view(winid)
+	return self.diff_style == "split"
+		and not self.diffsplit.opening
+		and win_valid(self.sidebar_win)
+		and win_valid(self.main_win)
+		and win_valid(self.diffsplit.head_win)
+		and vim.tbl_contains({ self.sidebar_win, self.main_win, self.diffsplit.head_win }, winid)
+end
+
+function Layout:close_split_view()
+	local main_buf = self.diffsplit.main_buf
+	self.diffsplit:close()
+
+	if win_valid(self.main_win) then
+		self:close()
+		pcall(vim.api.nvim_win_close, self.main_win, true)
+		return
+	end
+
+	if self:has_sidebar() and not pcall(vim.api.nvim_win_close, self.sidebar_win, true) then
+		local buf = main_buf and vim.api.nvim_buf_is_valid(main_buf) and main_buf or vim.api.nvim_create_buf(true, false)
+		vim.api.nvim_win_set_buf(self.sidebar_win, buf)
+		apply_win_opts(self.sidebar_win, self.main_opts or {})
+		self.main_win = self.sidebar_win
+	end
+
+	self.sidebar_win = nil
+	self.sidebar_buf = nil
+end
+
 return Layout

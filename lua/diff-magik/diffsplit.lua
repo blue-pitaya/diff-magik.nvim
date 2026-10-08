@@ -146,7 +146,7 @@ function DiffSplit:close()
 	self:restore_main_state()
 
 	if win_valid(self.head_win) then
-		vim.api.nvim_win_close(self.head_win, true)
+		pcall(vim.api.nvim_win_close, self.head_win, true)
 	end
 
 	self.head_win = nil

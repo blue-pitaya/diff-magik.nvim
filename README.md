@@ -15,3 +15,7 @@ require("diff-magik").setup()
 - `:DiffMagikBrowser`
 - `:DiffMagikBrowserDiffToggle`
 - `:DiffMagikBrowserSizeToggle`
+
+# Known issues
+
+- Enteting in unified mode from browser unfolds file

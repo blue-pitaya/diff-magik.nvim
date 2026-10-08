@@ -14,8 +14,27 @@ local config = require("diff-magik.config")
 local Browser = {}
 Browser.__index = Browser
 
+local group_id = 0
+
 function Browser.new()
-	return setmetatable({ layout = Layout.new(), diff_bufs = {} }, Browser)
+	group_id = group_id + 1
+
+	local self = setmetatable({ layout = Layout.new(), diff_bufs = {} }, Browser)
+	local augroup = vim.api.nvim_create_augroup(("diff-magik.browser.%d"):format(group_id), { clear = true })
+
+	vim.api.nvim_create_autocmd("WinClosed", {
+		group = augroup,
+		callback = function(args)
+			if self.layout:in_split_view(tonumber(args.match)) then
+				vim.schedule(function()
+					self:close_split_view()
+				end)
+			end
+		end,
+		desc = "DiffMagik: close the whole two-pane view once any of its windows is closed",
+	})
+
+	return self
 end
 
 ---@class BrowserAction
@@ -261,6 +280,11 @@ end
 function Browser:close()
 	self:clear_diff_keymaps()
 	self.layout:close()
+end
+
+function Browser:close_split_view()
+	self:clear_diff_keymaps()
+	self.layout:close_split_view()
 end
 
 function Browser:open()
