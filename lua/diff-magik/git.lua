@@ -1,14 +1,14 @@
 ---@class Git
----@field root string absolute path to the git repo's top level
----@field has_head boolean|nil
----@field empty_tree string|nil
+---@field root string
+---@field has_head? boolean
+---@field empty_tree? string
 local Git = {}
 Git.__index = Git
 
 local EMPTY_TREE_SHA1 = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
 ---@param args string[]
----@param opts { stdin?: string, sep?: string }|nil
+---@param opts? { stdin?: string, sep?: string }
 local function run(args, opts)
 	opts = opts or {}
 
@@ -26,7 +26,7 @@ local function run(args, opts)
 end
 
 ---@param dir string
----@return string|nil dir the closest ancestor that still exists on disk
+---@return string?
 local function existing_dir(dir)
 	while not vim.uv.fs_stat(dir) do
 		local parent = vim.fs.dirname(dir)
@@ -53,12 +53,12 @@ function Git.new(dir)
 	return setmetatable({ root = root }, Git)
 end
 
----@param root string absolute path to the repo's top level
+---@param root string
 function Git.from_root(root)
 	return setmetatable({ root = root }, Git)
 end
 
----@return string rev `HEAD`, or the empty tree while the repo has no commits
+---@return string
 function Git:base()
 	if not self.has_head then
 		self.has_head = run({ "-C", self.root, "rev-parse", "--verify", "--quiet", "HEAD" }) ~= nil
@@ -74,7 +74,7 @@ function Git:base()
 	return self.empty_tree
 end
 
----@param rel string path to the file, relative to `self.root`
+---@param rel string
 function Git:exists_in_head(rel)
 	return run({ "-C", self.root, "cat-file", "-e", ("%s:%s"):format(self:base(), rel) }) ~= nil
 end
@@ -110,7 +110,7 @@ function Git:is_unstaged(rel)
 end
 
 ---@param rel string
----@return boolean ok
+---@return boolean
 function Git:toggle_stage(rel)
 	if self:is_staged(rel) and not self:is_unstaged(rel) then
 		return self:unstage(rel)
@@ -119,7 +119,7 @@ function Git:toggle_stage(rel)
 end
 
 ---@param rel string
----@return boolean ok
+---@return boolean
 function Git:reset(rel)
 	if self:exists_in_head(rel) then
 		return run({ "-C", self.root, "checkout", self:base(), "--", rel }) ~= nil
@@ -146,10 +146,10 @@ function Git:index_lines(rel)
 	return run({ "-C", self.root, "show", (":%s"):format(rel) })
 end
 
----@param rel string path to the file, relative to `self.root`
----@return string[]|nil lines the version to diff against, empty when the file is not in the base
----@return string|nil label the revision the lines came from
----@return string|nil err
+---@param rel string
+---@return string[]?
+---@return string?
+---@return string?
 function Git:base_lines(rel)
 	local entries = self:get_changed_files({ rel })
 	if not entries then
@@ -184,13 +184,13 @@ function Git:base_lines(rel)
 end
 
 ---@class GitEntry
----@field status string status against HEAD
+---@field status string
 ---@field path string
----@field staged boolean the index differs from HEAD
----@field unstaged boolean the working tree differs from the index
+---@field staged boolean
+---@field unstaged boolean
 
----@param x string index status letter
----@param y string working-tree status letter
+---@param x string
+---@param y string
 local function entry_status(x, y)
 	if x == "?" then
 		return "A"
@@ -201,8 +201,8 @@ local function entry_status(x, y)
 	return y
 end
 
----@param pathspec string[]|nil limits the scan to these paths
----@return GitEntry[]|nil
+---@param pathspec? string[]
+---@return GitEntry[]?
 function Git:get_changed_files(pathspec)
 	local args = {
 		"-C",

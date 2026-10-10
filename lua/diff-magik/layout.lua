@@ -19,29 +19,25 @@ local SIDEBAR_WIN_OPTS = {
 	cursorlineopt = "line",
 }
 
----@class Layout
----@field sidebar_win integer|nil
----@field sidebar_buf integer|nil
----@field main_win integer|nil the window holding the working copy
----@field main_opts table<string, any>|nil `SIDEBAR_WIN_OPTS` as they were before the sidebar existed
----@field sidebar_width integer what the sidebar window is actually set to
----@field content_width integer display width of the widest row rendered so far
+---@class LayoutState
+---@field sidebar_win? integer
+---@field sidebar_buf? integer
+---@field main_win? integer
+---@field main_opts? table<string, any>
+---@field sidebar_width integer
+---@field content_width integer
 ---@field width_mode DiffMagikWidthMode
 ---@field diff_style DiffMagikDiffStyle
----@field diffsplit DiffSplit owns the HEAD pane
----@field filediff FileDiff draws the single-pane diff
-local Layout = {}
-Layout.__index = Layout
+local state = {
+	sidebar_width = SIDEBAR_MIN_WIDTH,
+	content_width = SIDEBAR_MIN_WIDTH,
+}
 
-function Layout.new()
-	return setmetatable({
-		diffsplit = DiffSplit.new(),
-		filediff = FileDiff.new(),
-		sidebar_width = SIDEBAR_MIN_WIDTH,
-		content_width = SIDEBAR_MIN_WIDTH,
-		width_mode = config.options.width_mode,
-		diff_style = config.options.diff_style,
-	}, Layout)
+local M = {}
+
+function M.setup()
+	state.width_mode = config.options.width_mode
+	state.diff_style = config.options.diff_style
 end
 
 ---@param winid integer
@@ -62,80 +58,85 @@ local function apply_win_opts(winid, opts)
 	end
 end
 
-function Layout:has_sidebar()
-	return win_valid(self.sidebar_win)
+---@return integer?
+function M.sidebar_buf()
+	return state.sidebar_buf
 end
 
-function Layout:apply_sidebar_width()
-	local max = math.max(SIDEBAR_MIN_WIDTH, math.floor(vim.o.columns * SIDEBAR_MAX_RATIO))
-	local wanted = self.width_mode == "constant" and SIDEBAR_MIN_WIDTH or self.content_width
-	self.sidebar_width = math.min(math.max(wanted, SIDEBAR_MIN_WIDTH), max)
+function M.has_sidebar()
+	return win_valid(state.sidebar_win)
+end
 
-	if self:has_sidebar() then
-		vim.api.nvim_win_set_width(self.sidebar_win, self.sidebar_width)
+local function apply_sidebar_width()
+	local max = math.max(SIDEBAR_MIN_WIDTH, math.floor(vim.o.columns * SIDEBAR_MAX_RATIO))
+	local wanted = state.width_mode == "constant" and SIDEBAR_MIN_WIDTH or state.content_width
+	state.sidebar_width = math.min(math.max(wanted, SIDEBAR_MIN_WIDTH), max)
+
+	if M.has_sidebar() then
+		vim.api.nvim_win_set_width(state.sidebar_win, state.sidebar_width)
 	end
 end
 
----@param width integer display width of the widest row
-function Layout:fit_sidebar(width)
-	self.content_width = width
-	self:apply_sidebar_width()
+---@param width integer
+function M.fit_sidebar(width)
+	state.content_width = width
+	apply_sidebar_width()
 end
 
 ---@return DiffMagikWidthMode
-function Layout:toggle_width_mode()
-	self.width_mode = self.width_mode == "expand" and "constant" or "expand"
-	self:apply_sidebar_width()
-	return self.width_mode
+function M.toggle_width_mode()
+	state.width_mode = state.width_mode == "expand" and "constant" or "expand"
+	apply_sidebar_width()
+	return state.width_mode
 end
 
 ---@return DiffMagikDiffStyle
-function Layout:toggle_diff_style()
-	self.diff_style = self.diff_style == "split" and "inline" or "split"
+function M.toggle_diff_style()
+	state.diff_style = state.diff_style == "split" and "inline" or "split"
 
-	if self.diff_style == "inline" then
-		self.diffsplit:close()
+	if state.diff_style == "inline" then
+		DiffSplit.close()
 	else
-		self.filediff:clear()
+		FileDiff.clear()
 	end
 
-	return self.diff_style
+	return state.diff_style
 end
 
----@return boolean ok
-function Layout:focus_sidebar()
-	if not self:has_sidebar() then
+---@return boolean
+function M.focus_sidebar()
+	if not M.has_sidebar() then
 		return false
 	end
-	vim.api.nvim_set_current_win(self.sidebar_win)
+	vim.api.nvim_set_current_win(state.sidebar_win)
 	return true
 end
 
----@return integer|nil
-function Layout:sidebar_cursor()
-	if not self:has_sidebar() then
+---@return integer?
+function M.sidebar_cursor()
+	if not M.has_sidebar() then
 		return nil
 	end
-	return vim.api.nvim_win_get_cursor(self.sidebar_win)[1]
+	return vim.api.nvim_win_get_cursor(state.sidebar_win)[1]
 end
 
 ---@param line integer
-function Layout:set_sidebar_cursor(line)
-	if self:has_sidebar() then
-		vim.api.nvim_win_set_cursor(self.sidebar_win, { line, 0 })
+function M.set_sidebar_cursor(line)
+	if M.has_sidebar() then
+		vim.api.nvim_win_set_cursor(state.sidebar_win, { line, 0 })
 	end
 end
 
----@return integer|nil winid a window that may host the working copy
-function Layout:reusable_win()
+---@return integer?
+local function reusable_win()
 	local candidates = vim.api.nvim_tabpage_list_wins(0)
 	table.insert(candidates, 1, vim.api.nvim_get_current_win())
 
 	for _, winid in ipairs(candidates) do
 		if
 			win_valid(winid)
-			and winid ~= self.sidebar_win
-			and winid ~= self.diffsplit.head_win
+			and winid ~= state.sidebar_win
+			and winid ~= DiffSplit.head_win()
 			and not is_floating(winid)
 			and vim.bo[vim.api.nvim_win_get_buf(winid)].buftype == ""
 		then
@@ -144,56 +145,56 @@ function Layout:reusable_win()
 	end
 end
 
----@return integer winid recreated whenever the previous main window was closed
-function Layout:ensure_main()
-	if win_valid(self.main_win) then
-		return self.main_win
+---@return integer
+local function ensure_main()
+	if win_valid(state.main_win) then
+		return state.main_win
 	end
 
-	local reused = self:reusable_win()
+	local reused = reusable_win()
 	if reused then
-		self.main_win = reused
+		state.main_win = reused
 		return reused
 	end
 
-	local anchor = self:has_sidebar() and self.sidebar_win or vim.api.nvim_get_current_win()
+	local anchor = M.has_sidebar() and state.sidebar_win or vim.api.nvim_get_current_win()
 	vim.api.nvim_set_current_win(anchor)
 	vim.cmd.vsplit({ mods = { split = "belowright" } })
-	self.main_win = vim.api.nvim_get_current_win()
+	state.main_win = vim.api.nvim_get_current_win()
 
-	apply_win_opts(self.main_win, self.main_opts or {})
+	apply_win_opts(state.main_win, state.main_opts or {})
 
-	if anchor == self.sidebar_win then
-		self:apply_sidebar_width()
+	if anchor == state.sidebar_win then
+		apply_sidebar_width()
 	end
 
-	return self.main_win
+	return state.main_win
 end
 
----@return integer bufnr of the sidebar
-function Layout:open_sidebar()
-	self.main_win = self:reusable_win() or vim.api.nvim_get_current_win()
-	self.main_opts = capture_win_opts(self.main_win)
-	vim.api.nvim_set_current_win(self.main_win)
+---@return integer
+function M.open_sidebar()
+	state.main_win = reusable_win() or vim.api.nvim_get_current_win()
+	state.main_opts = capture_win_opts(state.main_win)
+	vim.api.nvim_set_current_win(state.main_win)
 
 	vim.cmd.vsplit({ mods = { split = "topleft" } })
-	self.sidebar_win = vim.api.nvim_get_current_win()
-	self:apply_sidebar_width()
+	state.sidebar_win = vim.api.nvim_get_current_win()
+	apply_sidebar_width()
 
-	self.sidebar_buf = util.scratch_buf("diffmagik://changes")
-	vim.api.nvim_win_set_buf(self.sidebar_win, self.sidebar_buf)
-	vim.bo[self.sidebar_buf].filetype = "diffmagik"
+	state.sidebar_buf = util.scratch_buf("diffmagik://changes")
+	vim.api.nvim_win_set_buf(state.sidebar_win, state.sidebar_buf)
+	vim.bo[state.sidebar_buf].filetype = "diffmagik"
 
-	apply_win_opts(self.sidebar_win, SIDEBAR_WIN_OPTS)
+	apply_win_opts(state.sidebar_win, SIDEBAR_WIN_OPTS)
 
-	return self.sidebar_buf
+	return state.sidebar_buf
 end
 
 ---@param repo Git
----@param rel string path to the file, relative to `repo.root`
----@return integer[]|nil bufs the buffers making up the diff
-function Layout:open_file(repo, rel)
-	local main_win = self:ensure_main()
+---@param rel string
+---@return integer[]?
+function M.open_file(repo, rel)
+	local main_win = ensure_main()
 	vim.api.nvim_set_current_win(main_win)
 
 	local ok, err = pcall(vim.cmd.edit, { args = { vim.fs.joinpath(repo.root, rel) } })
@@ -204,69 +205,71 @@ function Layout:open_file(repo, rel)
 
 	local bufnr = vim.api.nvim_win_get_buf(main_win)
 
-	if self.diff_style == "inline" then
-		self.filediff:attach(repo, rel, bufnr)
+	if state.diff_style == "inline" then
+		FileDiff.attach(repo, rel, bufnr)
 		return { bufnr }
 	end
 
-	self.filediff:detach(bufnr)
-	self.diffsplit:open_against_head(repo, rel)
+	FileDiff.detach(bufnr)
+	DiffSplit.open_against_head(repo, rel)
 
 	local bufs = { bufnr }
-	if win_valid(self.diffsplit.head_win) then
-		table.insert(bufs, vim.api.nvim_win_get_buf(self.diffsplit.head_win))
+	local head_win = DiffSplit.head_win()
+	if win_valid(head_win) then
+		table.insert(bufs, vim.api.nvim_win_get_buf(head_win))
 	end
 	return bufs
 end
 
-function Layout:reload_main()
-	if not win_valid(self.main_win) then
+function M.reload_main()
+	if not win_valid(state.main_win) then
 		return
 	end
 
-	vim.api.nvim_win_call(self.main_win, function()
+	vim.api.nvim_win_call(state.main_win, function()
 		pcall(vim.cmd.edit, { bang = true })
 	end)
 end
 
-function Layout:close()
-	if self:has_sidebar() then
-		vim.api.nvim_win_close(self.sidebar_win, true)
+function M.close()
+	if M.has_sidebar() then
+		vim.api.nvim_win_close(state.sidebar_win, true)
 	end
-	self.sidebar_win = nil
-	self.sidebar_buf = nil
+	state.sidebar_win = nil
+	state.sidebar_buf = nil
 end
 
 ---@param winid integer
 ---@return boolean
-function Layout:in_split_view(winid)
-	return self.diff_style == "split"
-		and not self.diffsplit.opening
-		and win_valid(self.sidebar_win)
-		and win_valid(self.main_win)
-		and win_valid(self.diffsplit.head_win)
-		and vim.tbl_contains({ self.sidebar_win, self.main_win, self.diffsplit.head_win }, winid)
+function M.in_split_view(winid)
+	local head_win = DiffSplit.head_win()
+	return state.diff_style == "split"
+		and not DiffSplit.is_opening()
+		and win_valid(state.sidebar_win)
+		and win_valid(state.main_win)
+		and win_valid(head_win)
+		and vim.tbl_contains({ state.sidebar_win, state.main_win, head_win }, winid)
 end
 
-function Layout:close_split_view()
-	local main_buf = self.diffsplit.main_buf
-	self.diffsplit:close()
+function M.close_split_view()
+	local main_buf = DiffSplit.main_buf()
+	DiffSplit.close()
 
-	if win_valid(self.main_win) then
-		self:close()
-		pcall(vim.api.nvim_win_close, self.main_win, true)
+	if win_valid(state.main_win) then
+		M.close()
+		pcall(vim.api.nvim_win_close, state.main_win, true)
 		return
 	end
 
-	if self:has_sidebar() and not pcall(vim.api.nvim_win_close, self.sidebar_win, true) then
+	if M.has_sidebar() and not pcall(vim.api.nvim_win_close, state.sidebar_win, true) then
 		local buf = main_buf and vim.api.nvim_buf_is_valid(main_buf) and main_buf or vim.api.nvim_create_buf(true, false)
-		vim.api.nvim_win_set_buf(self.sidebar_win, buf)
-		apply_win_opts(self.sidebar_win, self.main_opts or {})
-		self.main_win = self.sidebar_win
+		vim.api.nvim_win_set_buf(state.sidebar_win, buf)
+		apply_win_opts(state.sidebar_win, state.main_opts or {})
+		state.main_win = state.sidebar_win
 	end
 
-	self.sidebar_win = nil
-	self.sidebar_buf = nil
+	state.sidebar_win = nil
+	state.sidebar_buf = nil
 end
 
-return Layout
+return M

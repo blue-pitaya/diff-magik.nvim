@@ -1,6 +1,6 @@
 local M = {}
 
----@param winid integer|nil
+---@param winid integer?
 ---@return boolean
 function M.win_valid(winid)
 	return winid ~= nil and vim.api.nvim_win_is_valid(winid)
@@ -13,7 +13,7 @@ function M.is_floating(winid)
 end
 
 ---@param name string
----@return integer bufnr an unlisted scratch buffer, wiped once hidden
+---@return integer
 function M.scratch_buf(name)
 	local buf = vim.api.nvim_create_buf(false, true)
 	vim.api.nvim_buf_set_name(buf, name)
@@ -24,16 +24,16 @@ function M.scratch_buf(name)
 end
 
 ---@param bufnr integer
----@param root string absolute path to the repo's top level
----@param rel string path to the file, relative to `root`
+---@param root string
+---@param rel string
 function M.tag_buffer(bufnr, root, rel)
 	vim.b[bufnr].diffmagik_root = root
 	vim.b[bufnr].diffmagik_path = rel
 end
 
 ---@param bufnr integer
----@return string|nil root
----@return string|nil rel
+---@return string?
+---@return string?
 function M.buffer_target(bufnr)
 	return vim.b[bufnr].diffmagik_root, vim.b[bufnr].diffmagik_path
 end

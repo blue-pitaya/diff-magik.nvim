@@ -1,17 +1,17 @@
 ---@class TreeNode
 ---@field name string
 ---@field is_dir boolean
----@field expanded boolean|nil only set on directory nodes
----@field children TreeNode[]|nil only set on directory nodes
----@field dirs_by_name table<string, TreeNode>|nil only set on directory nodes
----@field entry GitEntry|nil only set on file nodes
+---@field expanded? boolean
+---@field children? TreeNode[]
+---@field dirs_by_name? table<string, TreeNode>
+---@field entry? GitEntry
 local TreeNode = {}
 TreeNode.__index = TreeNode
 
 ---@class TreeFlatItem
 ---@field node TreeNode
 ---@field depth integer
----@field path string directories keep a trailing slash
+---@field path string
 
 ---@param entries GitEntry[]
 function TreeNode.new(entries)
@@ -62,7 +62,7 @@ end
 
 ---@param depth integer
 ---@param out TreeFlatItem[]
----@param prefix string|nil
+---@param prefix? string
 function TreeNode:flatten(depth, out, prefix)
 	prefix = prefix or ""
 
@@ -76,7 +76,7 @@ function TreeNode:flatten(depth, out, prefix)
 end
 
 ---@param out table<string, boolean>
----@param prefix string|nil
+---@param prefix? string
 function TreeNode:collect_collapsed(out, prefix)
 	prefix = prefix or ""
 
@@ -92,7 +92,7 @@ function TreeNode:collect_collapsed(out, prefix)
 end
 
 ---@param collapsed table<string, boolean>
----@param prefix string|nil
+---@param prefix? string
 function TreeNode:apply_collapsed(collapsed, prefix)
 	prefix = prefix or ""
 

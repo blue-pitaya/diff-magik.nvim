@@ -4,52 +4,25 @@ local Layout = require("diff-magik.layout")
 local render = require("diff-magik.render")
 local config = require("diff-magik.config")
 
----@class Browser
----@field layout Layout
----@field repo Git|nil
----@field tree TreeNode|nil
----@field flat TreeFlatItem[]|nil
----@field current_path string|nil
+---@class BrowserState
+---@field repo? Git
+---@field tree? TreeNode
+---@field flat? TreeFlatItem[]
+---@field current_path? string
 ---@field diff_bufs integer[]
-local Browser = {}
-Browser.__index = Browser
+local state = { diff_bufs = {} }
 
-local group_id = 0
+local M = {}
 
-function Browser.new()
-	group_id = group_id + 1
-
-	local self = setmetatable({ layout = Layout.new(), diff_bufs = {} }, Browser)
-	local augroup = vim.api.nvim_create_augroup(("diff-magik.browser.%d"):format(group_id), { clear = true })
-
-	vim.api.nvim_create_autocmd("WinClosed", {
-		group = augroup,
-		callback = function(args)
-			if self.layout:in_split_view(tonumber(args.match)) then
-				vim.schedule(function()
-					self:close_split_view()
-				end)
-			end
-		end,
-		desc = "DiffMagik: close the whole two-pane view once any of its windows is closed",
-	})
-
-	return self
-end
-
----@class BrowserAction
----@field desc string
----@field run fun(browser: Browser)
-
----@type table<string, BrowserAction>
+---@type table<string, { desc: string, run: fun() }>
 local ACTIONS = {
-	open = { desc = "DiffMagik: open entry", run = function(b) b:open_selected() end },
-	close = { desc = "DiffMagik: close browser", run = function(b) b:close() end },
-	stage = { desc = "DiffMagik: stage or unstage entry", run = function(b) b:toggle_stage_selected() end },
-	reset = { desc = "DiffMagik: discard the changes to entry", run = function(b) b:reset_selected() end },
-	next_file = { desc = "DiffMagik: next changed file", run = function(b) b:select_offset(1) end },
-	prev_file = { desc = "DiffMagik: previous changed file", run = function(b) b:select_offset(-1) end },
-	toggle_width = { desc = "DiffMagik: toggle the sidebar width mode", run = function(b) b:toggle_width_mode() end },
+	open = { desc = "DiffMagik: open entry", run = function() M.open_selected() end },
+	close = { desc = "DiffMagik: close browser", run = function() M.close() end },
+	stage = { desc = "DiffMagik: stage or unstage entry", run = function() M.toggle_stage_selected() end },
+	reset = { desc = "DiffMagik: discard the changes to entry", run = function() M.reset_selected() end },
+	next_file = { desc = "DiffMagik: next changed file", run = function() M.select_offset(1) end },
+	prev_file = { desc = "DiffMagik: previous changed file", run = function() M.select_offset(-1) end },
+	toggle_width = { desc = "DiffMagik: toggle the sidebar width mode", run = function() M.toggle_width_mode() end },
 }
 
 local SIDEBAR_ACTIONS = { "open", "stage", "reset", "close", "toggle_width" }
@@ -57,13 +30,11 @@ local DIFF_ACTIONS = { "next_file", "prev_file" }
 
 ---@param bufnr integer
 ---@param names string[]
-function Browser:set_keymaps(bufnr, names)
+local function set_keymaps(bufnr, names)
 	for _, name in ipairs(names) do
 		local action = ACTIONS[name]
 		for _, key in ipairs(config.options.keys[name]) do
-			vim.keymap.set("n", key, function()
-				action.run(self)
-			end, {
+			vim.keymap.set("n", key, action.run, {
 				buffer = bufnr,
 				nowait = true,
 				silent = true,
@@ -83,158 +54,158 @@ local function del_keymaps(bufnr, names)
 	end
 end
 
-function Browser:render_tree()
-	local buf = self.layout.sidebar_buf
+local function render_tree()
+	local buf = Layout.sidebar_buf()
 	if not buf or not vim.api.nvim_buf_is_valid(buf) then
 		return
 	end
 
 	local flat = {}
-	self.tree:flatten(0, flat)
-	self.flat = flat
+	state.tree:flatten(0, flat)
+	state.flat = flat
 
-	self.layout:fit_sidebar(render(buf, flat))
+	Layout.fit_sidebar(render(buf, flat))
 end
 
-function Browser:refresh()
-	if not self.repo or not self.layout:has_sidebar() then
+function M.refresh()
+	if not state.repo or not Layout.has_sidebar() then
 		return
 	end
 
-	local entries = self.repo:get_changed_files()
+	local entries = state.repo:get_changed_files()
 	if not entries then
 		return
 	end
 
-	local line = self.layout:sidebar_cursor()
-	local cursor_path = line and self.flat and self.flat[line] and self.flat[line].path
+	local line = Layout.sidebar_cursor()
+	local cursor_path = line and state.flat and state.flat[line] and state.flat[line].path
 
 	local collapsed = {}
-	if self.tree then
-		self.tree:collect_collapsed(collapsed)
+	if state.tree then
+		state.tree:collect_collapsed(collapsed)
 	end
 
-	self.tree = TreeNode.new(entries)
-	self.tree:sort()
-	self.tree:apply_collapsed(collapsed)
+	state.tree = TreeNode.new(entries)
+	state.tree:sort()
+	state.tree:apply_collapsed(collapsed)
 
-	self:render_tree()
+	render_tree()
 
 	local target = 1
-	for i, item in ipairs(self.flat) do
+	for i, item in ipairs(state.flat) do
 		if item.path == cursor_path then
 			target = i
 			break
 		end
 	end
-	self.layout:set_sidebar_cursor(math.min(target, math.max(#self.flat, 1)))
+	Layout.set_sidebar_cursor(math.min(target, math.max(#state.flat, 1)))
 end
 
-function Browser:clear_diff_keymaps()
-	for _, buf in ipairs(self.diff_bufs) do
+local function clear_diff_keymaps()
+	for _, buf in ipairs(state.diff_bufs) do
 		if vim.api.nvim_buf_is_valid(buf) then
 			del_keymaps(buf, DIFF_ACTIONS)
 		end
 	end
-	self.diff_bufs = {}
+	state.diff_bufs = {}
 end
 
 ---@param bufs integer[]
-function Browser:set_diff_keymaps(bufs)
-	self:clear_diff_keymaps()
+local function set_diff_keymaps(bufs)
+	clear_diff_keymaps()
 
 	for _, buf in ipairs(bufs) do
-		self:set_keymaps(buf, DIFF_ACTIONS)
+		set_keymaps(buf, DIFF_ACTIONS)
 	end
 
-	self.diff_bufs = bufs
+	state.diff_bufs = bufs
 end
 
----@return integer|nil
-function Browser:current_index()
-	if not self.flat or not self.current_path then
+---@return integer?
+local function current_index()
+	if not state.flat or not state.current_path then
 		return nil
 	end
 
-	for i, item in ipairs(self.flat) do
-		if not item.node.is_dir and item.node.entry.path == self.current_path then
+	for i, item in ipairs(state.flat) do
+		if not item.node.is_dir and item.node.entry.path == state.current_path then
 			return i
 		end
 	end
 end
 
+---@param entry GitEntry
+local function open_entry(entry)
+	local bufs = Layout.open_file(state.repo, entry.path)
+	if not bufs then
+		return
+	end
+
+	state.current_path = entry.path
+	set_diff_keymaps(bufs)
+end
+
 ---@param offset integer
-function Browser:select_offset(offset)
-	local index = self:current_index()
+function M.select_offset(offset)
+	local index = current_index()
 	if not index then
 		return
 	end
 
 	local i = index + offset
-	while self.flat[i] do
-		if not self.flat[i].node.is_dir then
-			self.layout:set_sidebar_cursor(i)
-			self:open_entry(self.flat[i].node.entry)
+	while state.flat[i] do
+		if not state.flat[i].node.is_dir then
+			Layout.set_sidebar_cursor(i)
+			open_entry(state.flat[i].node.entry)
 			return
 		end
 		i = i + offset
 	end
 end
 
----@param entry GitEntry
-function Browser:open_entry(entry)
-	local bufs = self.layout:open_file(self.repo, entry.path)
-	if not bufs then
-		return
-	end
-
-	self.current_path = entry.path
-	self:set_diff_keymaps(bufs)
-end
-
-function Browser:open_selected()
-	local line = self.layout:sidebar_cursor()
-	local item = line and self.flat[line]
+function M.open_selected()
+	local line = Layout.sidebar_cursor()
+	local item = line and state.flat[line]
 	if not item then
 		return
 	end
 
 	if item.node.is_dir then
 		item.node.expanded = not item.node.expanded
-		self:render_tree()
-		self.layout:set_sidebar_cursor(line)
+		render_tree()
+		Layout.set_sidebar_cursor(line)
 	else
-		self:open_entry(item.node.entry)
+		open_entry(item.node.entry)
 	end
 end
 
----@return GitEntry|nil
-function Browser:selected_entry()
-	local line = self.layout:sidebar_cursor()
-	local item = line and self.flat and self.flat[line]
+---@return GitEntry?
+local function selected_entry()
+	local line = Layout.sidebar_cursor()
+	local item = line and state.flat and state.flat[line]
 	if not item or item.node.is_dir then
 		return nil
 	end
 	return item.node.entry
 end
 
-function Browser:toggle_stage_selected()
-	local entry = self:selected_entry()
-	if not self.repo or not entry then
+function M.toggle_stage_selected()
+	local entry = selected_entry()
+	if not state.repo or not entry then
 		return
 	end
 
-	if not self.repo:toggle_stage(entry.path) then
+	if not state.repo:toggle_stage(entry.path) then
 		vim.notify(("DiffMagik: failed to update the index for '%s'"):format(entry.path), vim.log.levels.ERROR)
 		return
 	end
 
-	self:refresh()
+	M.refresh()
 end
 
-function Browser:reset_selected()
-	local entry = self:selected_entry()
-	if not self.repo or not entry then
+function M.reset_selected()
+	local entry = selected_entry()
+	if not state.repo or not entry then
 		return
 	end
 
@@ -243,52 +214,66 @@ function Browser:reset_selected()
 		return
 	end
 
-	if not self.repo:reset(entry.path) then
+	if not state.repo:reset(entry.path) then
 		vim.notify(("DiffMagik: failed to reset '%s'"):format(entry.path), vim.log.levels.ERROR)
 		return
 	end
 
-	if self.current_path == entry.path then
-		self.layout:reload_main()
+	if state.current_path == entry.path then
+		Layout.reload_main()
 	end
 
-	self:refresh()
+	M.refresh()
 end
 
-function Browser:toggle_diff_style()
-	local style = self.layout:toggle_diff_style()
+function M.toggle_diff_style()
+	local style = Layout.toggle_diff_style()
 	vim.notify(("DiffMagik: browser diff style is %s"):format(style))
 
-	local index = self:current_index()
-	local item = index and self.flat[index]
+	local index = current_index()
+	local item = index and state.flat[index]
 	if not item then
 		return
 	end
 
 	local from = vim.api.nvim_get_current_win()
-	self:open_entry(item.node.entry)
+	open_entry(item.node.entry)
 	if vim.api.nvim_win_is_valid(from) then
 		vim.api.nvim_set_current_win(from)
 	end
 end
 
-function Browser:toggle_width_mode()
-	local mode = self.layout:toggle_width_mode()
+function M.toggle_width_mode()
+	local mode = Layout.toggle_width_mode()
 	vim.notify(("DiffMagik: sidebar width is %s"):format(mode))
 end
 
-function Browser:close()
-	self:clear_diff_keymaps()
-	self.layout:close()
+function M.close()
+	clear_diff_keymaps()
+	Layout.close()
 end
 
-function Browser:close_split_view()
-	self:clear_diff_keymaps()
-	self.layout:close_split_view()
+local function close_split_view()
+	clear_diff_keymaps()
+	Layout.close_split_view()
 end
 
-function Browser:open()
-	if self.layout:focus_sidebar() then
+function M.setup()
+	local augroup = vim.api.nvim_create_augroup("diff-magik.browser", { clear = true })
+
+	vim.api.nvim_create_autocmd("WinClosed", {
+		group = augroup,
+		callback = function(args)
+			if Layout.in_split_view(tonumber(args.match)) then
+				vim.schedule(close_split_view)
+			end
+		end,
+		desc = "DiffMagik: close the whole two-pane view once any of its windows is closed",
+	})
+end
+
+function M.open()
+	if Layout.focus_sidebar() then
 		return
 	end
 
@@ -314,21 +299,21 @@ function Browser:open()
 	local tree = TreeNode.new(entries)
 	tree:sort()
 
-	self.repo = repo
-	self.tree = tree
+	state.repo = repo
+	state.tree = tree
 
-	local bufnr = self.layout:open_sidebar()
-	self:render_tree()
+	local bufnr = Layout.open_sidebar()
+	render_tree()
 
 	vim.api.nvim_create_autocmd("BufEnter", {
 		buffer = bufnr,
 		callback = function()
-			self:refresh()
+			M.refresh()
 		end,
 		desc = "DiffMagik: refresh the changed-file list",
 	})
 
-	self:set_keymaps(bufnr, SIDEBAR_ACTIONS)
+	set_keymaps(bufnr, SIDEBAR_ACTIONS)
 end
 
-return Browser
+return M

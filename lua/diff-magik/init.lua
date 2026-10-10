@@ -1,12 +1,15 @@
 local Git = require("diff-magik.git")
 local DiffSplit = require("diff-magik.diffsplit")
+local FileDiff = require("diff-magik.filediff")
+local Layout = require("diff-magik.layout")
 local Browser = require("diff-magik.browser")
 local util = require("diff-magik.util")
 local config = require("diff-magik.config")
 
 local M = {}
 
----@return Git|nil, string|nil
+---@return Git?
+---@return string?
 local function current_file()
 	local root, rel = util.buffer_target(vim.api.nvim_get_current_buf())
 	if root and rel then
@@ -34,17 +37,19 @@ local function current_file()
 	return repo, rel
 end
 
----@param opts table|nil partial `DiffMagikConfig`
+---@param opts? table
 function M.setup(opts)
 	config.setup(opts)
 
-	local diffsplit = DiffSplit.new()
-	local browser = Browser.new()
+	DiffSplit.setup()
+	FileDiff.setup()
+	Layout.setup()
+	Browser.setup()
 
 	vim.api.nvim_create_user_command("DiffMagikOpen", function()
 		local repo, rel = current_file()
 		if repo and rel then
-			diffsplit:open_against_head(repo, rel)
+			DiffSplit.open_against_head(repo, rel)
 		end
 	end, {
 		desc = "Diff the current buffer's file against git HEAD",
@@ -61,24 +66,24 @@ function M.setup(opts)
 				return
 			end
 
-			browser:refresh()
+			Browser.refresh()
 		end, { desc = "DiffMagik: stage or unstage the current file" })
 	end
 
 	vim.api.nvim_create_user_command("DiffMagikBrowser", function()
-		browser:open()
+		Browser.open()
 	end, {
 		desc = "Open a sidebar browser of all changed files vs git HEAD",
 	})
 
 	vim.api.nvim_create_user_command("DiffMagikBrowserDiffToggle", function()
-		browser:toggle_diff_style()
+		Browser.toggle_diff_style()
 	end, {
 		desc = "Switch the browser between the two-pane and single-pane diff styles",
 	})
 
 	vim.api.nvim_create_user_command("DiffMagikBrowserSizeToggle", function()
-		browser:toggle_width_mode()
+		Browser.toggle_width_mode()
 	end, {
 		desc = "Switch the browser sidebar between the expanding and constant widths",
 	})

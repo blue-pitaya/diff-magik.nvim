@@ -38,8 +38,8 @@ local function stage_hl(entry)
 end
 
 ---@param flat TreeFlatItem[]
----@return string[] lines
----@return integer widest display width of the rows
+---@return string[]
+---@return integer
 local function build_lines(flat)
 	local lines = {}
 	local widest = 0
@@ -92,7 +92,7 @@ end
 
 ---@param buf integer
 ---@param flat TreeFlatItem[]
----@return integer widest display width of the rendered rows
+---@return integer
 local function render(buf, flat)
 	local lines, widest = build_lines(flat)
 

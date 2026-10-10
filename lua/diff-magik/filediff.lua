@@ -2,7 +2,6 @@ local config = require("diff-magik.config")
 local util = require("diff-magik.util")
 
 local ns = vim.api.nvim_create_namespace("diff-magik.filediff")
-local group_id = 0
 
 local COPIED_HL = {
 	DiffMagikFileAdded = "DiffAdd",
@@ -22,24 +21,27 @@ local FOLD_OPTS = {
 	foldlevel = 0,
 }
 
----@type table<integer, table<integer, boolean>|nil>
+---@type table<integer, table<integer, boolean>>
 local unfolded = {}
 
 ---@class FileDiffState
----@field base string the base revision's text, as `vim.diff` wants it
+---@field base string
 ---@field base_lines string[]
----@field label string the revision the base came from
+---@field label string
 
----@class FileDiff
----@field augroup integer
+---@class FileDiffModuleState
 ---@field active table<integer, FileDiffState>
----@field win_opts table<integer, table<string, any>> `FOLD_OPTS` as they were before we folded a window
-local FileDiff = {}
-FileDiff.__index = FileDiff
+---@field win_opts table<integer, table<string, any>>
+local state = {
+	active = {},
+	win_opts = {},
+}
+
+local M = {}
 
 ---@param lnum integer
 ---@return string
-function FileDiff.foldexpr(lnum)
+function M.foldexpr(lnum)
 	local keep = unfolded[vim.api.nvim_get_current_buf()]
 	if not keep or keep[lnum] then
 		return "0"
@@ -93,7 +95,7 @@ local function mark_unfolded(bufnr, hunks)
 end
 
 ---@param bufnr integer
----@return integer width the widest text area the buffer is displayed in
+---@return integer
 local function text_width(bufnr)
 	local width = 0
 	for _, winid in ipairs(vim.fn.win_findbuf(bufnr)) do
@@ -105,77 +107,65 @@ local function text_width(bufnr)
 	return width
 end
 
-function FileDiff.new()
-	group_id = group_id + 1
-
-	local self = setmetatable({
-		augroup = vim.api.nvim_create_augroup(("diff-magik.filediff.%d"):format(group_id), { clear = true }),
-		active = {},
-		win_opts = {},
-	}, FileDiff)
-
-	define_hl()
-
-	vim.api.nvim_create_autocmd("ColorScheme", {
-		group = self.augroup,
-		callback = define_hl,
-		desc = "DiffMagik: re-copy the diff colors the in-file diff draws with",
-	})
-
-	vim.api.nvim_create_autocmd({ "TextChanged", "InsertLeave", "BufReadPost" }, {
-		group = self.augroup,
-		callback = function(args)
-			self:render(args.buf)
-		end,
-		desc = "DiffMagik: keep the in-file diff in sync with the buffer",
-	})
-
-	vim.api.nvim_create_autocmd({ "WinResized", "VimResized" }, {
-		group = self.augroup,
-		callback = function()
-			for bufnr in pairs(self.active) do
-				self:render(bufnr)
+---@param bufnr integer
+---@param force boolean
+local function fold_windows(bufnr, force)
+	for _, winid in ipairs(vim.fn.win_findbuf(bufnr)) do
+		if not state.win_opts[winid] then
+			local saved = {}
+			for name in pairs(FOLD_OPTS) do
+				saved[name] = vim.wo[winid][name]
 			end
-		end,
-		desc = "DiffMagik: refit the in-file diff to the window",
-	})
+			state.win_opts[winid] = saved
 
-	vim.api.nvim_create_autocmd({ "BufDelete", "BufWipeout" }, {
-		group = self.augroup,
-		callback = function(args)
-			self:detach(args.buf)
-		end,
-		desc = "DiffMagik: drop the in-file diff of a closed buffer",
-	})
-
-	vim.api.nvim_create_autocmd("LspAttach", {
-		group = self.augroup,
-		callback = function(args)
-			local bufnr = args.buf
-			vim.schedule(function()
-				if self.active[bufnr] then
-					self:refold_windows(bufnr)
-				end
+			for name, value in pairs(FOLD_OPTS) do
+				vim.wo[winid][name] = value
+			end
+		elseif force then
+			vim.api.nvim_win_call(winid, function()
+				vim.cmd("normal! zX")
 			end)
-		end,
-		desc = "DiffMagik: keep the hunk folds an attaching LSP would take over",
-	})
-
-	return self
+		end
+	end
 end
 
 ---@param bufnr integer
-function FileDiff:render(bufnr)
-	local state = self.active[bufnr]
-	if not state or not vim.api.nvim_buf_is_valid(bufnr) then
+local function refold_windows(bufnr)
+	for _, winid in ipairs(vim.fn.win_findbuf(bufnr)) do
+		if state.win_opts[winid] and vim.api.nvim_win_is_valid(winid) then
+			if vim.wo[winid].foldmethod ~= FOLD_OPTS.foldmethod or vim.wo[winid].foldexpr ~= FOLD_OPTS.foldexpr then
+				vim.wo[winid][0].foldmethod = FOLD_OPTS.foldmethod
+				vim.wo[winid][0].foldexpr = FOLD_OPTS.foldexpr
+			end
+		end
+	end
+end
+
+---@param bufnr integer
+local function unfold_windows(bufnr)
+	for _, winid in ipairs(vim.fn.win_findbuf(bufnr)) do
+		local saved = state.win_opts[winid]
+		if saved then
+			for name, value in pairs(saved) do
+				vim.wo[winid][name] = value
+			end
+			state.win_opts[winid] = nil
+		end
+	end
+end
+
+---@param bufnr integer
+local function render(bufnr)
+	local diff = state.active[bufnr]
+	if not diff or not vim.api.nvim_buf_is_valid(bufnr) then
 		return
 	end
 
 	vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
 
 	local current = as_text(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false))
-	---@type integer[][]|nil
-	local hunks = vim.diff(state.base, current, { result_type = "indices" })
+	---@type integer[][]?
+	local hunks = vim.diff(diff.base, current, { result_type = "indices" })
 	if not hunks then
 		return
 	end
@@ -196,7 +186,7 @@ function FileDiff:render(bufnr)
 		if count_a > 0 then
 			local virt_lines = {}
 			for i = 0, count_a - 1 do
-				local text = expand_tabs(state.base_lines[start_a + i] or "", tabstop)
+				local text = expand_tabs(diff.base_lines[start_a + i] or "", tabstop)
 				text = text .. (" "):rep(math.max(width - vim.fn.strdisplaywidth(text), 0))
 				table.insert(virt_lines, { { text, hl.file_deleted } })
 			end
@@ -210,59 +200,12 @@ function FileDiff:render(bufnr)
 	end
 
 	mark_unfolded(bufnr, hunks)
-	self:fold_windows(bufnr, false)
+	fold_windows(bufnr, false)
 end
 
 ---@param bufnr integer
----@param force boolean recompute the folds of a window that is already set up
-function FileDiff:fold_windows(bufnr, force)
-	for _, winid in ipairs(vim.fn.win_findbuf(bufnr)) do
-		if not self.win_opts[winid] then
-			local saved = {}
-			for name in pairs(FOLD_OPTS) do
-				saved[name] = vim.wo[winid][name]
-			end
-			self.win_opts[winid] = saved
-
-			for name, value in pairs(FOLD_OPTS) do
-				vim.wo[winid][name] = value
-			end
-		elseif force then
-			vim.api.nvim_win_call(winid, function()
-				vim.cmd("normal! zX")
-			end)
-		end
-	end
-end
-
----@param bufnr integer
-function FileDiff:refold_windows(bufnr)
-	for _, winid in ipairs(vim.fn.win_findbuf(bufnr)) do
-		if self.win_opts[winid] and vim.api.nvim_win_is_valid(winid) then
-			if vim.wo[winid].foldmethod ~= FOLD_OPTS.foldmethod or vim.wo[winid].foldexpr ~= FOLD_OPTS.foldexpr then
-				vim.wo[winid][0].foldmethod = FOLD_OPTS.foldmethod
-				vim.wo[winid][0].foldexpr = FOLD_OPTS.foldexpr
-			end
-		end
-	end
-end
-
----@param bufnr integer
-function FileDiff:unfold_windows(bufnr)
-	for _, winid in ipairs(vim.fn.win_findbuf(bufnr)) do
-		local saved = self.win_opts[winid]
-		if saved then
-			for name, value in pairs(saved) do
-				vim.wo[winid][name] = value
-			end
-			self.win_opts[winid] = nil
-		end
-	end
-end
-
----@param bufnr integer
-function FileDiff:detach(bufnr)
-	self.active[bufnr] = nil
+function M.detach(bufnr)
+	state.active[bufnr] = nil
 	unfolded[bufnr] = nil
 
 	if not vim.api.nvim_buf_is_valid(bufnr) then
@@ -270,28 +213,79 @@ function FileDiff:detach(bufnr)
 	end
 
 	vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
-	self:unfold_windows(bufnr)
+	unfold_windows(bufnr)
 end
 
-function FileDiff:clear()
-	for bufnr in pairs(self.active) do
-		self:detach(bufnr)
+function M.clear()
+	for bufnr in pairs(state.active) do
+		M.detach(bufnr)
 	end
-	self.win_opts = {}
+	state.win_opts = {}
+end
+
+function M.setup()
+	local augroup = vim.api.nvim_create_augroup("diff-magik.filediff", { clear = true })
+
+	define_hl()
+
+	vim.api.nvim_create_autocmd("ColorScheme", {
+		group = augroup,
+		callback = define_hl,
+		desc = "DiffMagik: re-copy the diff colors the in-file diff draws with",
+	})
+
+	vim.api.nvim_create_autocmd({ "TextChanged", "InsertLeave", "BufReadPost" }, {
+		group = augroup,
+		callback = function(args)
+			render(args.buf)
+		end,
+		desc = "DiffMagik: keep the in-file diff in sync with the buffer",
+	})
+
+	vim.api.nvim_create_autocmd({ "WinResized", "VimResized" }, {
+		group = augroup,
+		callback = function()
+			for bufnr in pairs(state.active) do
+				render(bufnr)
+			end
+		end,
+		desc = "DiffMagik: refit the in-file diff to the window",
+	})
+
+	vim.api.nvim_create_autocmd({ "BufDelete", "BufWipeout" }, {
+		group = augroup,
+		callback = function(args)
+			M.detach(args.buf)
+		end,
+		desc = "DiffMagik: drop the in-file diff of a closed buffer",
+	})
+
+	vim.api.nvim_create_autocmd("LspAttach", {
+		group = augroup,
+		callback = function(args)
+			local bufnr = args.buf
+			vim.schedule(function()
+				if state.active[bufnr] then
+					refold_windows(bufnr)
+				end
+			end)
+		end,
+		desc = "DiffMagik: keep the hunk folds an attaching LSP would take over",
+	})
 end
 
 ---@param repo Git
----@param rel string path to the file, relative to `repo.root`
+---@param rel string
 ---@param bufnr integer
----@return string|nil label the revision the buffer is now diffed against
-function FileDiff:attach(repo, rel, bufnr)
+---@return string?
+function M.attach(repo, rel, bufnr)
 	local base_lines, label, err = repo:base_lines(rel)
 	if not base_lines then
 		vim.notify("DiffMagik: " .. err, vim.log.levels.ERROR)
 		return nil
 	end
 
-	self.active[bufnr] = {
+	state.active[bufnr] = {
 		base = as_text(base_lines),
 		base_lines = base_lines,
 		label = label,
@@ -299,10 +293,10 @@ function FileDiff:attach(repo, rel, bufnr)
 
 	util.tag_buffer(bufnr, repo.root, rel)
 
-	self:render(bufnr)
-	self:fold_windows(bufnr, true)
+	render(bufnr)
+	fold_windows(bufnr, true)
 
 	return label
 end
 
-return FileDiff
+return M

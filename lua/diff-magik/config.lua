@@ -69,7 +69,7 @@ local M = {}
 ---@type DiffMagikConfig
 M.options = vim.deepcopy(defaults)
 
----@param opts table|nil partial `DiffMagikConfig`
+---@param opts? table
 function M.setup(opts)
 	opts = opts or {}
 
