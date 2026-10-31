@@ -3,11 +3,13 @@ local util = require("diff-magik.util")
 
 local win_valid = util.win_valid
 
+local MAIN_OPTS = { "fillchars", "winhighlight", "foldcolumn" }
+
 ---@class DiffSplitState
 ---@field head_win? integer
 ---@field main_win? integer
 ---@field main_buf? integer
----@field main_state? { fillchars: string, winhighlight: string, foldcolumn: string }
+---@field main_opts? table<string, any>
 ---@field opening? boolean
 local state = {}
 
@@ -15,13 +17,14 @@ local M = {}
 
 ---@param winid integer
 ---@param char string
-local function set_diff_fillchar(winid, char)
+---@return string
+local function diff_fillchars(winid, char)
 	local parts = vim.tbl_filter(function(part)
 		return not vim.startswith(part, "diff:")
 	end, vim.split(vim.wo[winid].fillchars, ",", { trimempty = true }))
 
 	table.insert(parts, "diff:" .. char)
-	vim.wo[winid].fillchars = table.concat(parts, ",")
+	return table.concat(parts, ",")
 end
 
 ---@param winid integer
@@ -33,8 +36,10 @@ local function diff_on(winid, winhighlight)
 
 	local wrap = vim.wo[winid].wrap
 
-	set_diff_fillchar(winid, config.options.fillchar)
-	vim.wo[winid].winhighlight = winhighlight
+	util.set_wo(winid, {
+		fillchars = diff_fillchars(winid, config.options.fillchar),
+		winhighlight = winhighlight,
+	})
 	vim.api.nvim_win_call(winid, function()
 		vim.cmd.diffthis()
 	end)
@@ -57,25 +62,10 @@ local function diff_off(winid)
 	end)
 end
 
----@param winid integer
-local function save_main_state(winid)
-	state.main_state = {
-		fillchars = vim.api.nvim_get_option_value("fillchars", { scope = "local", win = winid }),
-		winhighlight = vim.wo[winid].winhighlight,
-		foldcolumn = vim.wo[winid].foldcolumn,
-	}
-end
-
-local function restore_main_state()
-	local saved = state.main_state
-
-	if not saved or not win_valid(state.main_win) then
-		return
+local function restore_main_opts()
+	if state.main_opts and win_valid(state.main_win) then
+		util.set_wo(state.main_win, state.main_opts)
 	end
-
-	vim.api.nvim_set_option_value("fillchars", saved.fillchars, { scope = "local", win = state.main_win })
-	vim.wo[state.main_win].winhighlight = saved.winhighlight
-	vim.wo[state.main_win].foldcolumn = saved.foldcolumn
 end
 
 ---@return boolean
@@ -85,9 +75,12 @@ local function showing_main_buf()
 		and vim.api.nvim_win_get_buf(state.main_win) == state.main_buf
 end
 
+---@return integer?
 function M.close()
+	local main_buf = state.main_buf
+
 	diff_off(state.main_win)
-	restore_main_state()
+	restore_main_opts()
 
 	if win_valid(state.head_win) then
 		pcall(vim.api.nvim_win_close, state.head_win, true)
@@ -96,7 +89,9 @@ function M.close()
 	state.head_win = nil
 	state.main_win = nil
 	state.main_buf = nil
-	state.main_state = nil
+	state.main_opts = nil
+
+	return main_buf
 end
 
 local function sync()
@@ -115,12 +110,10 @@ local function sync()
 
 	if showing_main_buf() then
 		diff_on(state.main_win, config.options.highlights.main_win)
-		if win_valid(state.head_win) then
-			diff_on(state.head_win, config.options.highlights.head_win)
-		end
+		diff_on(state.head_win, config.options.highlights.head_win)
 	else
 		diff_off(state.main_win)
-		restore_main_state()
+		restore_main_opts()
 		diff_off(state.head_win)
 	end
 end
@@ -145,61 +138,72 @@ function M.setup()
 	})
 end
 
----@return integer?
-function M.head_win()
-	return state.head_win
-end
-
----@return integer?
-function M.main_buf()
-	return state.main_buf
-end
-
+---@param winid integer
 ---@return boolean
-function M.is_opening()
-	return state.opening == true
+function M.contains(winid)
+	return not state.opening
+		and win_valid(state.head_win)
+		and win_valid(state.main_win)
+		and (winid == state.head_win or winid == state.main_win)
 end
 
 ---@param repo Git
 ---@param rel string
-function M.open_against_head(repo, rel)
+---@param lines string[]
+---@param label string
+---@return integer
+local function split_head(repo, rel, lines, label)
 	local main_win = vim.api.nvim_get_current_win()
 	local bufnr = vim.api.nvim_get_current_buf()
-
-	local base_content, base_label, err = repo:base_lines(rel)
-	if not base_content then
-		vim.notify("DiffMagik: " .. err, vim.log.levels.ERROR)
-		return
-	end
-
-	state.opening = true
 
 	if win_valid(state.head_win) then
 		vim.api.nvim_win_close(state.head_win, true)
 	end
 
-	restore_main_state()
+	restore_main_opts()
 	vim.cmd.diffoff({ bang = true })
 
 	state.main_win = main_win
 	state.main_buf = bufnr
-	save_main_state(main_win)
+	state.main_opts = util.save_wo(main_win, MAIN_OPTS)
 
 	util.tag_buffer(bufnr, repo.root, rel)
 
 	vim.cmd.vsplit()
 	state.head_win = vim.api.nvim_get_current_win()
-	local head_buf = util.scratch_buf(("diffmagik://%s@%s"):format(rel, base_label))
-	vim.api.nvim_buf_set_lines(head_buf, 0, -1, false, base_content)
+	local head_buf = util.scratch_buf(("diffmagik://%s@%s"):format(rel, label))
+	vim.api.nvim_buf_set_lines(head_buf, 0, -1, false, lines)
 	vim.bo[head_buf].filetype = vim.bo[bufnr].filetype
 	vim.bo[head_buf].modifiable = false
 	util.tag_buffer(head_buf, repo.root, rel)
 
 	vim.api.nvim_win_set_buf(state.head_win, head_buf)
-
 	vim.api.nvim_set_current_win(main_win)
+
+	return head_buf
+end
+
+---@param repo Git
+---@param rel string
+---@return integer?
+function M.open_against_head(repo, rel)
+	local lines, label, err = repo:base_lines(rel)
+	if not lines then
+		util.error(err)
+		return nil
+	end
+
+	state.opening = true
+	local ok, head_buf = pcall(split_head, repo, rel, lines, label)
 	state.opening = false
+
+	if not ok then
+		util.error(head_buf)
+		return nil
+	end
+
 	sync()
+	return head_buf
 end
 
 return M

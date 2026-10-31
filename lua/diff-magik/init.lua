@@ -11,29 +11,10 @@ local M = {}
 ---@return Git?
 ---@return string?
 local function current_file()
-	local root, rel = util.buffer_target(vim.api.nvim_get_current_buf())
-	if root and rel then
-		return Git.from_root(root), rel
-	end
-
-	local filepath = vim.api.nvim_buf_get_name(0)
-	if filepath == "" then
-		vim.notify("DiffMagik: current buffer has no file", vim.log.levels.ERROR)
-		return nil, nil
-	end
-
-	local repo = Git.new(vim.fs.dirname(filepath))
+	local repo, rel, err = Git.for_buffer(vim.api.nvim_get_current_buf())
 	if not repo then
-		vim.notify("DiffMagik: not inside a git repository", vim.log.levels.ERROR)
-		return nil, nil
+		util.error(err)
 	end
-
-	local rel = vim.fs.relpath(repo.root, filepath)
-	if not rel then
-		vim.notify("DiffMagik: failed to resolve path relative to repo root", vim.log.levels.ERROR)
-		return nil, nil
-	end
-
 	return repo, rel
 end
 
@@ -58,15 +39,9 @@ function M.setup(opts)
 	for _, key in ipairs(config.options.keys.stage) do
 		vim.keymap.set("n", key, function()
 			local repo, rel = current_file()
-			if not repo or not rel then
-				return
+			if repo and rel then
+				Browser.toggle_stage(repo, rel)
 			end
-			if not repo:toggle_stage(rel) then
-				vim.notify(("DiffMagik: failed to update the index for '%s'"):format(rel), vim.log.levels.ERROR)
-				return
-			end
-
-			Browser.refresh()
 		end, { desc = "DiffMagik: stage or unstage the current file" })
 	end
 

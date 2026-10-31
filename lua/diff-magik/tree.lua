@@ -1,5 +1,6 @@
 ---@class TreeNode
 ---@field name string
+---@field path string
 ---@field is_dir boolean
 ---@field expanded? boolean
 ---@field children? TreeNode[]
@@ -11,11 +12,21 @@ TreeNode.__index = TreeNode
 ---@class TreeFlatItem
 ---@field node TreeNode
 ---@field depth integer
----@field path string
+
+---@param name string
+---@param path string
+---@return TreeNode
+local function new_dir(name, path)
+	return setmetatable(
+		{ name = name, path = path, is_dir = true, expanded = true, children = {}, dirs_by_name = {} },
+		TreeNode
+	)
+end
 
 ---@param entries GitEntry[]
+---@return TreeNode
 function TreeNode.new(entries)
-	local root = setmetatable({ name = "", is_dir = true, expanded = true, children = {}, dirs_by_name = {} }, TreeNode)
+	local root = new_dir("", "")
 
 	for _, entry in ipairs(entries) do
 		local node = root
@@ -23,18 +34,15 @@ function TreeNode.new(entries)
 		while true do
 			local slash = entry.path:find("/", start, true)
 			if not slash then
-				local name = entry.path:sub(start)
-				table.insert(node.children, setmetatable({ name = name, is_dir = false, entry = entry }, TreeNode))
+				local file = { name = entry.path:sub(start), path = entry.path, is_dir = false, entry = entry }
+				table.insert(node.children, setmetatable(file, TreeNode))
 				break
 			end
 
 			local name = entry.path:sub(start, slash - 1)
 			local dir = node.dirs_by_name[name]
 			if not dir then
-				dir = setmetatable(
-					{ name = name, is_dir = true, expanded = true, children = {}, dirs_by_name = {} },
-					TreeNode
-				)
+				dir = new_dir(name, entry.path:sub(1, slash))
 				node.dirs_by_name[name] = dir
 				table.insert(node.children, dir)
 			end
@@ -62,47 +70,35 @@ end
 
 ---@param depth integer
 ---@param out TreeFlatItem[]
----@param prefix? string
-function TreeNode:flatten(depth, out, prefix)
-	prefix = prefix or ""
-
+function TreeNode:flatten(depth, out)
 	for _, child in ipairs(self.children) do
-		local path = prefix .. child.name .. (child.is_dir and "/" or "")
-		table.insert(out, { node = child, depth = depth, path = path })
+		table.insert(out, { node = child, depth = depth })
 		if child.is_dir and child.expanded then
-			child:flatten(depth + 1, out, path)
+			child:flatten(depth + 1, out)
 		end
 	end
 end
 
 ---@param out table<string, boolean>
----@param prefix? string
-function TreeNode:collect_collapsed(out, prefix)
-	prefix = prefix or ""
-
+function TreeNode:collect_collapsed(out)
 	for _, child in ipairs(self.children) do
 		if child.is_dir then
-			local path = prefix .. child.name .. "/"
 			if not child.expanded then
-				out[path] = true
+				out[child.path] = true
 			end
-			child:collect_collapsed(out, path)
+			child:collect_collapsed(out)
 		end
 	end
 end
 
 ---@param collapsed table<string, boolean>
----@param prefix? string
-function TreeNode:apply_collapsed(collapsed, prefix)
-	prefix = prefix or ""
-
+function TreeNode:apply_collapsed(collapsed)
 	for _, child in ipairs(self.children) do
 		if child.is_dir then
-			local path = prefix .. child.name .. "/"
-			if collapsed[path] then
+			if collapsed[child.path] then
 				child.expanded = false
 			end
-			child:apply_collapsed(collapsed, path)
+			child:apply_collapsed(collapsed)
 		end
 	end
 end

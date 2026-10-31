@@ -2,6 +2,7 @@ local Git = require("diff-magik.git")
 local TreeNode = require("diff-magik.tree")
 local Layout = require("diff-magik.layout")
 local render = require("diff-magik.render")
+local util = require("diff-magik.util")
 local config = require("diff-magik.config")
 
 ---@class BrowserState
@@ -67,6 +68,26 @@ local function render_tree()
 	Layout.fit_sidebar(render(buf, flat))
 end
 
+---@param path string?
+---@return integer?
+local function index_of(path)
+	if not state.flat or not path then
+		return nil
+	end
+
+	for i, item in ipairs(state.flat) do
+		if item.node.path == path then
+			return i
+		end
+	end
+end
+
+---@return TreeFlatItem?
+local function selected_item()
+	local line = Layout.sidebar_cursor()
+	return line and state.flat and state.flat[line]
+end
+
 function M.refresh()
 	if not state.repo or not Layout.has_sidebar() then
 		return
@@ -77,8 +98,7 @@ function M.refresh()
 		return
 	end
 
-	local line = Layout.sidebar_cursor()
-	local cursor_path = line and state.flat and state.flat[line] and state.flat[line].path
+	local selected = selected_item()
 
 	local collapsed = {}
 	if state.tree then
@@ -91,14 +111,19 @@ function M.refresh()
 
 	render_tree()
 
-	local target = 1
-	for i, item in ipairs(state.flat) do
-		if item.path == cursor_path then
-			target = i
-			break
-		end
-	end
+	local target = selected and index_of(selected.node.path) or 1
 	Layout.set_sidebar_cursor(math.min(target, math.max(#state.flat, 1)))
+end
+
+---@param repo Git
+---@param rel string
+function M.toggle_stage(repo, rel)
+	if not repo:toggle_stage(rel) then
+		util.error(("failed to update the index for '%s'"):format(rel))
+		return
+	end
+
+	M.refresh()
 end
 
 local function clear_diff_keymaps()
@@ -121,19 +146,6 @@ local function set_diff_keymaps(bufs)
 	state.diff_bufs = bufs
 end
 
----@return integer?
-local function current_index()
-	if not state.flat or not state.current_path then
-		return nil
-	end
-
-	for i, item in ipairs(state.flat) do
-		if not item.node.is_dir and item.node.entry.path == state.current_path then
-			return i
-		end
-	end
-end
-
 ---@param entry GitEntry
 local function open_entry(entry)
 	local bufs = Layout.open_file(state.repo, entry.path)
@@ -147,7 +159,7 @@ end
 
 ---@param offset integer
 function M.select_offset(offset)
-	local index = current_index()
+	local index = index_of(state.current_path)
 	if not index then
 		return
 	end
@@ -164,13 +176,13 @@ function M.select_offset(offset)
 end
 
 function M.open_selected()
-	local line = Layout.sidebar_cursor()
-	local item = line and state.flat[line]
+	local item = selected_item()
 	if not item then
 		return
 	end
 
 	if item.node.is_dir then
+		local line = Layout.sidebar_cursor()
 		item.node.expanded = not item.node.expanded
 		render_tree()
 		Layout.set_sidebar_cursor(line)
@@ -181,8 +193,7 @@ end
 
 ---@return GitEntry?
 local function selected_entry()
-	local line = Layout.sidebar_cursor()
-	local item = line and state.flat and state.flat[line]
+	local item = selected_item()
 	if not item or item.node.is_dir then
 		return nil
 	end
@@ -191,16 +202,9 @@ end
 
 function M.toggle_stage_selected()
 	local entry = selected_entry()
-	if not state.repo or not entry then
-		return
+	if state.repo and entry then
+		M.toggle_stage(state.repo, entry.path)
 	end
-
-	if not state.repo:toggle_stage(entry.path) then
-		vim.notify(("DiffMagik: failed to update the index for '%s'"):format(entry.path), vim.log.levels.ERROR)
-		return
-	end
-
-	M.refresh()
 end
 
 function M.reset_selected()
@@ -215,7 +219,7 @@ function M.reset_selected()
 	end
 
 	if not state.repo:reset(entry.path) then
-		vim.notify(("DiffMagik: failed to reset '%s'"):format(entry.path), vim.log.levels.ERROR)
+		util.error(("failed to reset '%s'"):format(entry.path))
 		return
 	end
 
@@ -227,25 +231,22 @@ function M.reset_selected()
 end
 
 function M.toggle_diff_style()
-	local style = Layout.toggle_diff_style()
-	vim.notify(("DiffMagik: browser diff style is %s"):format(style))
+	util.info(("browser diff style is %s"):format(Layout.toggle_diff_style()))
 
-	local index = current_index()
-	local item = index and state.flat[index]
-	if not item then
+	local index = index_of(state.current_path)
+	if not index then
 		return
 	end
 
 	local from = vim.api.nvim_get_current_win()
-	open_entry(item.node.entry)
+	open_entry(state.flat[index].node.entry)
 	if vim.api.nvim_win_is_valid(from) then
 		vim.api.nvim_set_current_win(from)
 	end
 end
 
 function M.toggle_width_mode()
-	local mode = Layout.toggle_width_mode()
-	vim.notify(("DiffMagik: sidebar width is %s"):format(mode))
+	util.info(("sidebar width is %s"):format(Layout.toggle_width_mode()))
 end
 
 function M.close()
@@ -282,17 +283,17 @@ function M.open()
 
 	local repo = Git.new(dir)
 	if not repo then
-		vim.notify("DiffMagik: not inside a git repository", vim.log.levels.ERROR)
+		util.error("not inside a git repository")
 		return
 	end
 
 	local entries = repo:get_changed_files()
 	if not entries then
-		vim.notify("DiffMagik: failed to run git diff", vim.log.levels.ERROR)
+		util.error("failed to run git status")
 		return
 	end
 	if #entries == 0 then
-		vim.notify("DiffMagik: no changes in repository", vim.log.levels.ERROR)
+		util.error("no changes in repository")
 		return
 	end
 

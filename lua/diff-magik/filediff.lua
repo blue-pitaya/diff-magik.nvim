@@ -21,13 +21,12 @@ local FOLD_OPTS = {
 	foldlevel = 0,
 }
 
----@type table<integer, table<integer, boolean>>
-local unfolded = {}
+local FOLD_OPT_NAMES = vim.tbl_keys(FOLD_OPTS)
 
 ---@class FileDiffState
 ---@field base string
 ---@field base_lines string[]
----@field label string
+---@field keep? table<integer, boolean>
 
 ---@class FileDiffModuleState
 ---@field active table<integer, FileDiffState>
@@ -42,7 +41,8 @@ local M = {}
 ---@param lnum integer
 ---@return string
 function M.foldexpr(lnum)
-	local keep = unfolded[vim.api.nvim_get_current_buf()]
+	local diff = state.active[vim.api.nvim_get_current_buf()]
+	local keep = diff and diff.keep
 	if not keep or keep[lnum] then
 		return "0"
 	end
@@ -71,10 +71,10 @@ end
 
 ---@param bufnr integer
 ---@param hunks integer[][]
-local function mark_unfolded(bufnr, hunks)
+---@return table<integer, boolean>?
+local function unfolded_lines(bufnr, hunks)
 	if #hunks == 0 then
-		unfolded[bufnr] = nil
-		return
+		return nil
 	end
 
 	local total = vim.api.nvim_buf_line_count(bufnr)
@@ -91,7 +91,7 @@ local function mark_unfolded(bufnr, hunks)
 		end
 	end
 
-	unfolded[bufnr] = keep
+	return keep
 end
 
 ---@param bufnr integer
@@ -112,15 +112,8 @@ end
 local function fold_windows(bufnr, force)
 	for _, winid in ipairs(vim.fn.win_findbuf(bufnr)) do
 		if not state.win_opts[winid] then
-			local saved = {}
-			for name in pairs(FOLD_OPTS) do
-				saved[name] = vim.wo[winid][name]
-			end
-			state.win_opts[winid] = saved
-
-			for name, value in pairs(FOLD_OPTS) do
-				vim.wo[winid][name] = value
-			end
+			state.win_opts[winid] = util.save_wo(winid, FOLD_OPT_NAMES)
+			util.set_wo(winid, FOLD_OPTS)
 		elseif force then
 			vim.api.nvim_win_call(winid, function()
 				vim.cmd("normal! zX")
@@ -134,24 +127,19 @@ local function refold_windows(bufnr)
 	for _, winid in ipairs(vim.fn.win_findbuf(bufnr)) do
 		if state.win_opts[winid] and vim.api.nvim_win_is_valid(winid) then
 			if vim.wo[winid].foldmethod ~= FOLD_OPTS.foldmethod or vim.wo[winid].foldexpr ~= FOLD_OPTS.foldexpr then
-				vim.wo[winid][0].foldmethod = FOLD_OPTS.foldmethod
-				vim.wo[winid][0].foldexpr = FOLD_OPTS.foldexpr
+				util.set_wo(winid, { foldmethod = FOLD_OPTS.foldmethod, foldexpr = FOLD_OPTS.foldexpr })
 			end
 		end
 	end
 end
 
----@param bufnr integer
-local function unfold_windows(bufnr)
-	for _, winid in ipairs(vim.fn.win_findbuf(bufnr)) do
-		local saved = state.win_opts[winid]
-		if saved then
-			for name, value in pairs(saved) do
-				vim.wo[winid][name] = value
-			end
-			state.win_opts[winid] = nil
-		end
+---@param winid integer
+local function restore_window(winid)
+	local saved = state.win_opts[winid]
+	if saved and vim.api.nvim_win_is_valid(winid) then
+		util.set_wo(winid, saved)
 	end
+	state.win_opts[winid] = nil
 end
 
 ---@param bufnr integer
@@ -199,28 +187,31 @@ local function render(bufnr)
 		end
 	end
 
-	mark_unfolded(bufnr, hunks)
+	diff.keep = unfolded_lines(bufnr, hunks)
 	fold_windows(bufnr, false)
 end
 
 ---@param bufnr integer
 function M.detach(bufnr)
 	state.active[bufnr] = nil
-	unfolded[bufnr] = nil
 
 	if not vim.api.nvim_buf_is_valid(bufnr) then
 		return
 	end
 
 	vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
-	unfold_windows(bufnr)
+	for _, winid in ipairs(vim.fn.win_findbuf(bufnr)) do
+		restore_window(winid)
+	end
 end
 
 function M.clear()
 	for bufnr in pairs(state.active) do
 		M.detach(bufnr)
 	end
-	state.win_opts = {}
+	for winid in pairs(state.win_opts) do
+		restore_window(winid)
+	end
 end
 
 function M.setup()
@@ -260,6 +251,14 @@ function M.setup()
 		desc = "DiffMagik: drop the in-file diff of a closed buffer",
 	})
 
+	vim.api.nvim_create_autocmd("WinClosed", {
+		group = augroup,
+		callback = function(args)
+			state.win_opts[tonumber(args.match)] = nil
+		end,
+		desc = "DiffMagik: forget the fold options of a closed window",
+	})
+
 	vim.api.nvim_create_autocmd("LspAttach", {
 		group = augroup,
 		callback = function(args)
@@ -277,26 +276,22 @@ end
 ---@param repo Git
 ---@param rel string
 ---@param bufnr integer
----@return string?
 function M.attach(repo, rel, bufnr)
-	local base_lines, label, err = repo:base_lines(rel)
+	local base_lines, _, err = repo:base_lines(rel)
 	if not base_lines then
-		vim.notify("DiffMagik: " .. err, vim.log.levels.ERROR)
-		return nil
+		util.error(err)
+		return
 	end
 
 	state.active[bufnr] = {
 		base = as_text(base_lines),
 		base_lines = base_lines,
-		label = label,
 	}
 
 	util.tag_buffer(bufnr, repo.root, rel)
 
 	render(bufnr)
 	fold_windows(bufnr, true)
-
-	return label
 end
 
 return M

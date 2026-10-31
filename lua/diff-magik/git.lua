@@ -1,3 +1,5 @@
+local util = require("diff-magik.util")
+
 ---@class Git
 ---@field root string
 ---@field has_head? boolean
@@ -58,9 +60,37 @@ function Git.from_root(root)
 	return setmetatable({ root = root }, Git)
 end
 
+---@param bufnr integer
+---@return Git?
+---@return string?
+---@return string?
+function Git.for_buffer(bufnr)
+	local root, rel = util.buffer_target(bufnr)
+	if root and rel then
+		return Git.from_root(root), rel
+	end
+
+	local path = vim.api.nvim_buf_get_name(bufnr)
+	if path == "" then
+		return nil, nil, "current buffer has no file"
+	end
+
+	local repo = Git.new(vim.fs.dirname(path))
+	if not repo then
+		return nil, nil, "not inside a git repository"
+	end
+
+	rel = vim.fs.relpath(repo.root, path)
+	if not rel then
+		return nil, nil, "failed to resolve path relative to repo root"
+	end
+
+	return repo, rel
+end
+
 ---@return string
 function Git:base()
-	if not self.has_head then
+	if self.has_head == nil then
 		self.has_head = run({ "-C", self.root, "rev-parse", "--verify", "--quiet", "HEAD" }) ~= nil
 	end
 	if self.has_head then
@@ -75,21 +105,26 @@ function Git:base()
 end
 
 ---@param rel string
-function Git:exists_in_head(rel)
-	return run({ "-C", self.root, "cat-file", "-e", ("%s:%s"):format(self:base(), rel) }) ~= nil
+---@return GitEntry?
+function Git:entry(rel)
+	local entries = self:get_changed_files({ rel })
+	return entries and entries[1]
 end
 
 ---@param rel string
-function Git:diff_name_only(rel)
-	return run({ "-C", self.root, "diff", "--name-only", self:base(), "--", rel })
+---@return boolean
+function Git:matches_base(rel)
+	return run({ "-C", self.root, "diff", "--quiet", self:base(), "--", rel }) ~= nil
 end
 
 ---@param rel string
+---@return boolean
 function Git:stage(rel)
 	return run({ "-C", self.root, "add", "--", rel }) ~= nil
 end
 
 ---@param rel string
+---@return boolean
 function Git:unstage(rel)
 	if self:base() ~= "HEAD" then
 		return run({ "-C", self.root, "rm", "--cached", "--quiet", "--force", "--", rel }) ~= nil
@@ -98,21 +133,10 @@ function Git:unstage(rel)
 end
 
 ---@param rel string
-function Git:is_staged(rel)
-	local out = run({ "-C", self.root, "diff", "--cached", "--name-only", self:base(), "--", rel })
-	return out ~= nil and #out > 0
-end
-
----@param rel string
-function Git:is_unstaged(rel)
-	local out = run({ "-C", self.root, "diff", "--name-only", "--", rel })
-	return out ~= nil and #out > 0
-end
-
----@param rel string
 ---@return boolean
 function Git:toggle_stage(rel)
-	if self:is_staged(rel) and not self:is_unstaged(rel) then
+	local entry = self:entry(rel)
+	if entry and entry.staged and not entry.unstaged then
 		return self:unstage(rel)
 	end
 	return self:stage(rel)
@@ -121,11 +145,16 @@ end
 ---@param rel string
 ---@return boolean
 function Git:reset(rel)
-	if self:exists_in_head(rel) then
+	local entry = self:entry(rel)
+	if not entry then
+		return false
+	end
+
+	if entry.status ~= "A" then
 		return run({ "-C", self.root, "checkout", self:base(), "--", rel }) ~= nil
 	end
 
-	if self:is_staged(rel) and not self:unstage(rel) then
+	if entry.staged and not self:unstage(rel) then
 		return false
 	end
 
@@ -155,16 +184,13 @@ function Git:base_lines(rel)
 	if not entries then
 		return nil, nil, "failed to run git status"
 	end
-	if #entries == 0 then
+
+	local entry = entries[1]
+	if not entry then
 		return nil, nil, ("no changes in '%s'"):format(rel)
 	end
 
-	local worktree_changed = self:diff_name_only(rel)
-	if not worktree_changed then
-		return nil, nil, "failed to run git diff"
-	end
-
-	if #worktree_changed == 0 and entries[1].staged then
+	if entry.staged and entry.unstaged and self:matches_base(rel) then
 		local lines = self:index_lines(rel)
 		if not lines then
 			return nil, nil, "failed to read indexed version of file"
@@ -172,15 +198,15 @@ function Git:base_lines(rel)
 		return lines, "INDEX"
 	end
 
-	if self:exists_in_head(rel) then
-		local lines = self:head_lines(rel)
-		if not lines then
-			return nil, nil, "failed to read HEAD version of file"
-		end
-		return lines, "HEAD"
+	if entry.status == "A" then
+		return {}, "HEAD"
 	end
 
-	return {}, "HEAD"
+	local lines = self:head_lines(rel)
+	if not lines then
+		return nil, nil, "failed to read HEAD version of file"
+	end
+	return lines, "HEAD"
 end
 
 ---@class GitEntry

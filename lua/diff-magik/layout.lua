@@ -19,6 +19,8 @@ local SIDEBAR_WIN_OPTS = {
 	cursorlineopt = "line",
 }
 
+local SIDEBAR_WIN_OPT_NAMES = vim.tbl_keys(SIDEBAR_WIN_OPTS)
+
 ---@class LayoutState
 ---@field sidebar_win? integer
 ---@field sidebar_buf? integer
@@ -40,24 +42,6 @@ function M.setup()
 	state.diff_style = config.options.diff_style
 end
 
----@param winid integer
----@return table<string, any>
-local function capture_win_opts(winid)
-	local opts = {}
-	for name in pairs(SIDEBAR_WIN_OPTS) do
-		opts[name] = vim.wo[winid][name]
-	end
-	return opts
-end
-
----@param winid integer
----@param opts table<string, any>
-local function apply_win_opts(winid, opts)
-	for name, value in pairs(opts) do
-		vim.wo[winid][name] = value
-	end
-end
-
 ---@return integer?
 function M.sidebar_buf()
 	return state.sidebar_buf
@@ -65,6 +49,11 @@ end
 
 function M.has_sidebar()
 	return win_valid(state.sidebar_win)
+end
+
+local function forget_sidebar()
+	state.sidebar_win = nil
+	state.sidebar_buf = nil
 end
 
 local function apply_sidebar_width()
@@ -135,8 +124,6 @@ local function reusable_win()
 	for _, winid in ipairs(candidates) do
 		if
 			win_valid(winid)
-			and winid ~= state.sidebar_win
-			and winid ~= DiffSplit.head_win()
 			and not is_floating(winid)
 			and vim.bo[vim.api.nvim_win_get_buf(winid)].buftype == ""
 		then
@@ -162,7 +149,7 @@ local function ensure_main()
 	vim.cmd.vsplit({ mods = { split = "belowright" } })
 	state.main_win = vim.api.nvim_get_current_win()
 
-	apply_win_opts(state.main_win, state.main_opts or {})
+	util.set_wo(state.main_win, state.main_opts or {})
 
 	if anchor == state.sidebar_win then
 		apply_sidebar_width()
@@ -174,7 +161,7 @@ end
 ---@return integer
 function M.open_sidebar()
 	state.main_win = reusable_win() or vim.api.nvim_get_current_win()
-	state.main_opts = capture_win_opts(state.main_win)
+	state.main_opts = util.save_wo(state.main_win, SIDEBAR_WIN_OPT_NAMES)
 	vim.api.nvim_set_current_win(state.main_win)
 
 	vim.cmd.vsplit({ mods = { split = "topleft" } })
@@ -185,7 +172,7 @@ function M.open_sidebar()
 	vim.api.nvim_win_set_buf(state.sidebar_win, state.sidebar_buf)
 	vim.bo[state.sidebar_buf].filetype = "diffmagik"
 
-	apply_win_opts(state.sidebar_win, SIDEBAR_WIN_OPTS)
+	util.set_wo(state.sidebar_win, SIDEBAR_WIN_OPTS)
 
 	return state.sidebar_buf
 end
@@ -199,7 +186,7 @@ function M.open_file(repo, rel)
 
 	local ok, err = pcall(vim.cmd.edit, { args = { vim.fs.joinpath(repo.root, rel) } })
 	if not ok then
-		vim.notify(("DiffMagik: %s"):format(err), vim.log.levels.ERROR)
+		util.error(err)
 		return nil
 	end
 
@@ -211,14 +198,9 @@ function M.open_file(repo, rel)
 	end
 
 	FileDiff.detach(bufnr)
-	DiffSplit.open_against_head(repo, rel)
+	local head_buf = DiffSplit.open_against_head(repo, rel)
 
-	local bufs = { bufnr }
-	local head_win = DiffSplit.head_win()
-	if win_valid(head_win) then
-		table.insert(bufs, vim.api.nvim_win_get_buf(head_win))
-	end
-	return bufs
+	return { bufnr, head_buf }
 end
 
 function M.reload_main()
@@ -235,25 +217,20 @@ function M.close()
 	if M.has_sidebar() then
 		vim.api.nvim_win_close(state.sidebar_win, true)
 	end
-	state.sidebar_win = nil
-	state.sidebar_buf = nil
+	forget_sidebar()
 end
 
 ---@param winid integer
 ---@return boolean
 function M.in_split_view(winid)
-	local head_win = DiffSplit.head_win()
 	return state.diff_style == "split"
-		and not DiffSplit.is_opening()
 		and win_valid(state.sidebar_win)
-		and win_valid(state.main_win)
-		and win_valid(head_win)
-		and vim.tbl_contains({ state.sidebar_win, state.main_win, head_win }, winid)
+		and DiffSplit.contains(state.main_win)
+		and (winid == state.sidebar_win or DiffSplit.contains(winid))
 end
 
 function M.close_split_view()
-	local main_buf = DiffSplit.main_buf()
-	DiffSplit.close()
+	local main_buf = DiffSplit.close()
 
 	if win_valid(state.main_win) then
 		M.close()
@@ -264,12 +241,11 @@ function M.close_split_view()
 	if M.has_sidebar() and not pcall(vim.api.nvim_win_close, state.sidebar_win, true) then
 		local buf = main_buf and vim.api.nvim_buf_is_valid(main_buf) and main_buf or vim.api.nvim_create_buf(true, false)
 		vim.api.nvim_win_set_buf(state.sidebar_win, buf)
-		apply_win_opts(state.sidebar_win, state.main_opts or {})
+		util.set_wo(state.sidebar_win, state.main_opts or {})
 		state.main_win = state.sidebar_win
 	end
 
-	state.sidebar_win = nil
-	state.sidebar_buf = nil
+	forget_sidebar()
 end
 
 return M
