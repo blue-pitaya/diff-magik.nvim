@@ -3,6 +3,7 @@ local DiffSplit = require("diff-magik.diffsplit")
 local FileDiff = require("diff-magik.filediff")
 local Layout = require("diff-magik.layout")
 local Browser = require("diff-magik.browser")
+local Commit = require("diff-magik.commit")
 local util = require("diff-magik.util")
 local config = require("diff-magik.config")
 
@@ -43,6 +44,17 @@ function M.setup(opts)
 				Browser.toggle_stage(repo, rel)
 			end
 		end, { desc = "DiffMagik: stage or unstage the current file" })
+	end
+
+	for _, key in ipairs(config.options.keys.commit) do
+		vim.keymap.set("n", key, function()
+			local repo = Git.for_buffer(vim.api.nvim_get_current_buf()) or Git.new(vim.fn.getcwd())
+			if not repo then
+				util.error("not inside a git repository")
+				return
+			end
+			Commit.open(repo)
+		end, { desc = "DiffMagik: commit the staged changes" })
 	end
 
 	vim.api.nvim_create_user_command("DiffMagikBrowser", function()
