@@ -1,4 +1,5 @@
 local Git = require("diff-magik.git")
+local BufferOrigin = require("diff-magik.buffer-origin")
 local DiffSplit = require("diff-magik.diff-split")
 local FileDiff = require("diff-magik.file-diff")
 local Layout = require("diff-magik.layout")
@@ -9,14 +10,13 @@ local config = require("diff-magik.config")
 
 local M = {}
 
----@return Git?
----@return string?
+---@return BufferOrigin?
 local function current_file()
-	local repo, rel, err = Git.for_buffer(vim.api.nvim_get_current_buf())
-	if not repo then
+	local origin, err = BufferOrigin.of(vim.api.nvim_get_current_buf())
+	if err ~= nil then
 		util.error(err)
 	end
-	return repo, rel
+	return origin
 end
 
 ---@param opts? table
@@ -29,9 +29,9 @@ function M.setup(opts)
 	Browser.setup()
 
 	vim.api.nvim_create_user_command("DiffMagikOpen", function()
-		local repo, rel = current_file()
-		if repo and rel then
-			DiffSplit.open_against_head(repo, rel)
+		local origin = current_file()
+		if origin then
+			DiffSplit.open_against_head(Git.from_root(origin.root), origin.rel)
 		end
 	end, {
 		desc = "Diff the current buffer's file against git HEAD",
@@ -39,18 +39,24 @@ function M.setup(opts)
 
 	for _, key in ipairs(config.options.keys.stage) do
 		vim.keymap.set("n", key, function()
-			local repo, rel = current_file()
-			if repo and rel then
-				Browser.toggle_stage(repo, rel)
+			local origin = current_file()
+			if origin then
+				Browser.toggle_stage(Git.from_root(origin.root), origin.rel)
 			end
 		end, { desc = "DiffMagik: stage or unstage the current file" })
 	end
 
 	for _, key in ipairs(config.options.keys.commit) do
 		vim.keymap.set("n", key, function()
-			local repo = Git.for_buffer(vim.api.nvim_get_current_buf()) or Git.new(vim.fn.getcwd())
-			if not repo then
-				util.error("not inside a git repository")
+			local origin = BufferOrigin.of(vim.api.nvim_get_current_buf())
+			local repo, err
+			if origin then
+				repo = Git.from_root(origin.root)
+			else
+				repo, err = Git.new(vim.fn.getcwd())
+			end
+			if err ~= nil then
+				util.error(err)
 				return
 			end
 			Commit.open(repo)

@@ -17,13 +17,48 @@ local M = {}
 
 ---@type table<string, { desc: string, run: fun() }>
 local ACTIONS = {
-	open = { desc = "DiffMagik: open entry", run = function() M.open_selected() end },
-	close = { desc = "DiffMagik: close browser", run = function() M.close() end },
-	stage = { desc = "DiffMagik: stage or unstage entry", run = function() M.toggle_stage_selected() end },
-	reset = { desc = "DiffMagik: discard the changes to entry", run = function() M.reset_selected() end },
-	next_file = { desc = "DiffMagik: next changed file", run = function() M.select_offset(1) end },
-	prev_file = { desc = "DiffMagik: previous changed file", run = function() M.select_offset(-1) end },
-	toggle_width = { desc = "DiffMagik: toggle the sidebar width mode", run = function() M.toggle_width_mode() end },
+	open = {
+		desc = "DiffMagik: open entry",
+		run = function()
+			M.open_selected()
+		end,
+	},
+	close = {
+		desc = "DiffMagik: close browser",
+		run = function()
+			M.close()
+		end,
+	},
+	stage = {
+		desc = "DiffMagik: stage or unstage entry",
+		run = function()
+			M.toggle_stage_selected()
+		end,
+	},
+	reset = {
+		desc = "DiffMagik: discard the changes to entry",
+		run = function()
+			M.reset_selected()
+		end,
+	},
+	next_file = {
+		desc = "DiffMagik: next changed file",
+		run = function()
+			M.select_offset(1)
+		end,
+	},
+	prev_file = {
+		desc = "DiffMagik: previous changed file",
+		run = function()
+			M.select_offset(-1)
+		end,
+	},
+	toggle_width = {
+		desc = "DiffMagik: toggle the sidebar width mode",
+		run = function()
+			M.toggle_width_mode()
+		end,
+	},
 }
 
 local SIDEBAR_ACTIONS = { "open", "stage", "reset", "close", "toggle_width" }
@@ -93,8 +128,8 @@ function M.refresh()
 		return
 	end
 
-	local entries = state.repo:get_changed_files()
-	if not entries then
+	local entries, err = state.repo:get_changed_files()
+	if err ~= nil then
 		return
 	end
 
@@ -118,8 +153,9 @@ end
 ---@param repo Git
 ---@param rel string
 function M.toggle_stage(repo, rel)
-	if not repo:toggle_stage(rel) then
-		util.error(("failed to update the index for '%s'"):format(rel))
+	local _, err = repo:toggle_stage(rel)
+	if err ~= nil then
+		util.error(("failed to update the index for '%s': %s"):format(rel, err))
 		return
 	end
 
@@ -176,13 +212,13 @@ function M.select_offset(offset)
 end
 
 function M.open_selected()
-	local item = selected_item()
-	if not item then
+	local line = Layout.sidebar_cursor()
+	local item = line and state.flat and state.flat[line]
+	if not line or not item then
 		return
 	end
 
 	if item.node.is_dir then
-		local line = Layout.sidebar_cursor()
 		item.node.expanded = not item.node.expanded
 		render_tree()
 		Layout.set_sidebar_cursor(line)
@@ -218,8 +254,9 @@ function M.reset_selected()
 		return
 	end
 
-	if not state.repo:reset(entry.path) then
-		util.error(("failed to reset '%s'"):format(entry.path))
+	local _, err = state.repo:reset(entry.path)
+	if err ~= nil then
+		util.error(("failed to reset '%s': %s"):format(entry.path, err))
 		return
 	end
 
@@ -265,7 +302,8 @@ function M.setup()
 	vim.api.nvim_create_autocmd("WinClosed", {
 		group = augroup,
 		callback = function(args)
-			if Layout.in_split_view(tonumber(args.match)) then
+			local winid = tonumber(args.match)
+			if winid and Layout.in_split_view(winid) then
 				vim.schedule(close_split_view)
 			end
 		end,
@@ -281,15 +319,16 @@ function M.open()
 	local bufname = vim.api.nvim_buf_get_name(0)
 	local dir = bufname ~= "" and vim.fs.dirname(bufname) or vim.fn.getcwd()
 
-	local repo = Git.new(dir)
-	if not repo then
-		util.error("not inside a git repository")
+	local repo, err = Git.new(dir)
+	if err ~= nil then
+		util.error(err)
 		return
 	end
 
-	local entries = repo:get_changed_files()
-	if not entries then
-		util.error("failed to run git status")
+	local entries
+	entries, err = repo:get_changed_files()
+	if err ~= nil then
+		util.error(("failed to run git status: %s"):format(err))
 		return
 	end
 	if #entries == 0 then

@@ -3,9 +3,6 @@ local FileDiff = require("diff-magik.file-diff")
 local util = require("diff-magik.util")
 local config = require("diff-magik.config")
 
-local win_valid = util.win_valid
-local is_floating = util.is_floating
-
 local SIDEBAR_MIN_WIDTH = 40
 local SIDEBAR_MAX_WIDTH = 50
 local SIDEBAR_MAX_RATIO = 0.5
@@ -49,7 +46,7 @@ function M.sidebar_buf()
 end
 
 function M.has_sidebar()
-	return win_valid(state.sidebar_win)
+	return state.sidebar_win ~= nil and vim.api.nvim_win_is_valid(state.sidebar_win)
 end
 
 local function forget_sidebar()
@@ -124,8 +121,8 @@ local function reusable_win()
 
 	for _, winid in ipairs(candidates) do
 		if
-			win_valid(winid)
-			and not is_floating(winid)
+			vim.api.nvim_win_is_valid(winid)
+			and not util.is_floating(winid)
 			and vim.bo[vim.api.nvim_win_get_buf(winid)].buftype == ""
 		then
 			return winid
@@ -135,7 +132,7 @@ end
 
 ---@return integer
 local function ensure_main()
-	if win_valid(state.main_win) then
+	if state.main_win ~= nil and vim.api.nvim_win_is_valid(state.main_win) then
 		return state.main_win
 	end
 
@@ -204,7 +201,7 @@ function M.open_file(repo, rel)
 end
 
 function M.reload_main()
-	if not win_valid(state.main_win) then
+	if state.main_win == nil or not vim.api.nvim_win_is_valid(state.main_win) then
 		return
 	end
 
@@ -232,7 +229,7 @@ end
 ---@return boolean
 function M.in_split_view(winid)
 	return state.diff_style == "split"
-		and win_valid(state.sidebar_win)
+		and state.sidebar_win ~= nil and vim.api.nvim_win_is_valid(state.sidebar_win)
 		and DiffSplit.contains(state.main_win)
 		and (winid == state.sidebar_win or DiffSplit.contains(winid))
 end
@@ -240,7 +237,7 @@ end
 function M.close_split_view()
 	local main_buf = DiffSplit.close()
 
-	if win_valid(state.main_win) then
+	if state.main_win ~= nil and vim.api.nvim_win_is_valid(state.main_win) then
 		M.close()
 		pcall(vim.api.nvim_win_close, state.main_win, true)
 		return

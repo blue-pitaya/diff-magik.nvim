@@ -3,12 +3,18 @@ local TreeNode = require("diff-magik.tree")
 
 local test = h.test
 
+---@param path string
+---@return GitEntry
+local function entry(path)
+	return { path = path, status = "M", staged = false, unstaged = true }
+end
+
 local function build()
 	local tree = TreeNode.new({
-		{ path = "b.txt" },
-		{ path = "a/z.txt" },
-		{ path = "a/c/d.txt" },
-		{ path = "a.txt" },
+		entry("b.txt"),
+		entry("a/z.txt"),
+		entry("a/c/d.txt"),
+		entry("a.txt"),
 	})
 	tree:sort()
 	return tree

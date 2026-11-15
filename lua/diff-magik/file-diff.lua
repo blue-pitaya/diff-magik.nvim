@@ -11,7 +11,8 @@ local COPIED_HL = {
 
 local function define_hl()
 	for name, source in pairs(COPIED_HL) do
-		vim.api.nvim_set_hl(0, name, vim.api.nvim_get_hl(0, { name = source, link = false }))
+		local hl = vim.api.nvim_get_hl(0, { name = source, link = false }) --[[@as vim.api.keyset.highlight]]
+		vim.api.nvim_set_hl(0, name, hl)
 	end
 end
 
@@ -138,11 +139,7 @@ local function render(view)
 	end
 
 	local current = vim.api.nvim_buf_get_lines(diff.source, 0, -1, false)
-	---@type integer[][]?
-	local hunks = vim.diff(diff.base, as_text(current), { result_type = "indices" })
-	if not hunks then
-		return
-	end
+	local hunks = vim.text.diff(diff.base, as_text(current), { result_type = "indices" }) --[[@as integer[][] ]]
 
 	local hl = config.options.highlights
 	local lines = {}
@@ -278,15 +275,16 @@ end
 ---@param bufnr integer
 ---@return integer?
 function M.attach(repo, rel, bufnr)
-	local base_lines, label, err = repo:base_lines(rel)
-	if not base_lines then
+	local base, err = repo:base_lines(rel)
+	if err ~= nil then
 		util.error(err)
 		return nil
 	end
+	local base_lines = base.lines
 
 	local view = views_of(bufnr)[1]
 	if not view then
-		view = util.scratch_buf(("diffmagik://%s@%s:inline"):format(rel, label))
+		view = util.scratch_buf(("diffmagik://%s@%s:inline"):format(rel, base.label))
 		vim.bo[view].filetype = vim.bo[bufnr].filetype
 		BufferOrigin.new(repo.root, rel):tag(view)
 	end

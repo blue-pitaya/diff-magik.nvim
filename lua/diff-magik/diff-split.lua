@@ -2,8 +2,6 @@ local config = require("diff-magik.config")
 local util = require("diff-magik.util")
 local BufferOrigin = require("diff-magik.buffer-origin")
 
-local win_valid = util.win_valid
-
 local MAIN_OPTS = { "fillchars", "winhighlight", "foldcolumn" }
 
 ---@class DiffSplitState
@@ -54,7 +52,7 @@ end
 
 ---@param winid integer?
 local function diff_off(winid)
-	if not win_valid(winid) or not vim.wo[winid].diff then
+	if winid == nil or not vim.api.nvim_win_is_valid(winid) or not vim.wo[winid].diff then
 		return
 	end
 
@@ -64,14 +62,14 @@ local function diff_off(winid)
 end
 
 local function restore_main_opts()
-	if state.main_opts and win_valid(state.main_win) then
+	if state.main_opts and state.main_win ~= nil and vim.api.nvim_win_is_valid(state.main_win) then
 		util.set_wo(state.main_win, state.main_opts)
 	end
 end
 
 ---@return boolean
 local function showing_main_buf()
-	return win_valid(state.main_win)
+	return state.main_win ~= nil and vim.api.nvim_win_is_valid(state.main_win)
 		and state.main_buf ~= nil
 		and vim.api.nvim_win_get_buf(state.main_win) == state.main_buf
 end
@@ -83,7 +81,7 @@ function M.close()
 	diff_off(state.main_win)
 	restore_main_opts()
 
-	if win_valid(state.head_win) then
+	if state.head_win ~= nil and vim.api.nvim_win_is_valid(state.head_win) then
 		pcall(vim.api.nvim_win_close, state.head_win, true)
 	end
 
@@ -100,11 +98,11 @@ local function sync()
 		return
 	end
 
-	if not win_valid(state.main_win) or not state.main_buf then
+	if state.main_win == nil or not vim.api.nvim_win_is_valid(state.main_win) or not state.main_buf then
 		return
 	end
 
-	if not win_valid(state.head_win) then
+	if state.head_win == nil or not vim.api.nvim_win_is_valid(state.head_win) then
 		M.close()
 		return
 	end
@@ -143,8 +141,8 @@ end
 ---@return boolean
 function M.contains(winid)
 	return not state.opening
-		and win_valid(state.head_win)
-		and win_valid(state.main_win)
+		and state.head_win ~= nil and vim.api.nvim_win_is_valid(state.head_win)
+		and state.main_win ~= nil and vim.api.nvim_win_is_valid(state.main_win)
 		and (winid == state.head_win or winid == state.main_win)
 end
 
@@ -157,7 +155,7 @@ local function split_head(repo, rel, lines, label)
 	local main_win = vim.api.nvim_get_current_win()
 	local bufnr = vim.api.nvim_get_current_buf()
 
-	if win_valid(state.head_win) then
+	if state.head_win ~= nil and vim.api.nvim_win_is_valid(state.head_win) then
 		vim.api.nvim_win_close(state.head_win, true)
 	end
 
@@ -189,14 +187,14 @@ end
 ---@param rel string
 ---@return integer?
 function M.open_against_head(repo, rel)
-	local lines, label, err = repo:base_lines(rel)
-	if not lines then
+	local base, err = repo:base_lines(rel)
+	if err ~= nil then
 		util.error(err)
 		return nil
 	end
 
 	state.opening = true
-	local ok, head_buf = pcall(split_head, repo, rel, lines, label)
+	local ok, head_buf = pcall(split_head, repo, rel, base.lines, base.label)
 	state.opening = false
 
 	if not ok then

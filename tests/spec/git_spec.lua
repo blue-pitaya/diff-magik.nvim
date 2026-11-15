@@ -79,14 +79,14 @@ test("base_lines diffs a modified file against HEAD", function()
 	local root = h.repo({ ["a.txt"] = { "one", "two" } })
 	h.write(root .. "/a.txt", { "one", "three" })
 
-	h.eq({ { "one", "two" }, "HEAD" }, { Git.from_root(root):base_lines("a.txt") })
+	h.eq({ lines = { "one", "two" }, label = "HEAD" }, Git.from_root(root):base_lines("a.txt"))
 end)
 
 test("base_lines diffs an untracked file against an empty base", function()
 	local root = h.repo({ ["a.txt"] = { "a" } })
 	h.write(root .. "/new.txt", { "new" })
 
-	h.eq({ {}, "HEAD" }, { Git.from_root(root):base_lines("new.txt") })
+	h.eq({ lines = {}, label = "HEAD" }, Git.from_root(root):base_lines("new.txt"))
 end)
 
 test("base_lines diffs a staged then reverted file against the index", function()
@@ -95,14 +95,14 @@ test("base_lines diffs a staged then reverted file against the index", function(
 	h.git(root, { "add", "a.txt" })
 	h.write(root .. "/a.txt", { "one" })
 
-	h.eq({ { "two" }, "INDEX" }, { Git.from_root(root):base_lines("a.txt") })
+	h.eq({ lines = { "two" }, label = "INDEX" }, Git.from_root(root):base_lines("a.txt"))
 end)
 
 test("base_lines diffs a deleted file against HEAD", function()
 	local root = h.repo({ ["a.txt"] = { "one" } })
 	os.remove(root .. "/a.txt")
 
-	h.eq({ { "one" }, "HEAD" }, { Git.from_root(root):base_lines("a.txt") })
+	h.eq({ lines = { "one" }, label = "HEAD" }, Git.from_root(root):base_lines("a.txt"))
 end)
 
 test("base is the empty tree in a repository without commits", function()
@@ -115,7 +115,7 @@ test("base_lines diffs a new file against an empty base in a repository without 
 	local root = h.repo()
 	h.write(root .. "/new.txt", { "new" })
 
-	h.eq({ {}, "HEAD" }, { Git.from_root(root):base_lines("new.txt") })
+	h.eq({ lines = {}, label = "HEAD" }, Git.from_root(root):base_lines("new.txt"))
 end)
 
 test("toggle_stage stages a modified file and unstages it again", function()

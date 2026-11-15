@@ -5,15 +5,9 @@ function M.info(msg)
 	vim.notify("DiffMagik: " .. msg, vim.log.levels.INFO)
 end
 
----@param msg string
+---@param msg string|integer
 function M.error(msg)
 	vim.notify("DiffMagik: " .. msg, vim.log.levels.ERROR)
-end
-
----@param winid integer?
----@return boolean
-function M.win_valid(winid)
-	return winid ~= nil and vim.api.nvim_win_is_valid(winid)
 end
 
 ---@param winid integer
@@ -50,6 +44,26 @@ function M.scratch_buf(name)
 	vim.bo[buf].bufhidden = "wipe"
 	vim.bo[buf].swapfile = false
 	return buf
+end
+
+---@param path string
+---@return string? nil when no part of the path exists
+function M.nearest_existing_parent_dir(path)
+	while not vim.uv.fs_stat(path) do
+		local parent = vim.fs.dirname(path)
+		if not parent or parent == path then
+			return nil
+		end
+		path = parent
+	end
+	return path
+end
+
+---@param err string
+---@return any value always nil
+---@return string err
+function M.fail(err)
+	return nil, err
 end
 
 return M
