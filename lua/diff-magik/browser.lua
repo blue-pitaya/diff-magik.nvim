@@ -1,14 +1,12 @@
 local Git = require("diff-magik.git")
-local TreeNode = require("diff-magik.tree")
-local render = require("diff-magik.render")
+local ChangeList = require("diff-magik.change-list")
 local util = require("diff-magik.util")
 
 ---@class Browser
 ---@field config Config
 ---@field layout Layout
 ---@field repo? Git
----@field tree? TreeNode
----@field flat? TreeFlatItem[]
+---@field list? ChangeList changed files shown in the sidebar; set together with repo
 ---@field current_path? string
 ---@field diff_bufs integer[]
 local Browser = {}
@@ -56,50 +54,26 @@ function Browser.new(config, layout)
 	return self
 end
 
-function Browser:render_tree()
+function Browser:draw_list()
 	local buf = self.layout:get_sidebar_buf()
-	if not buf or not vim.api.nvim_buf_is_valid(buf) then
-		return
-	end
-
-	local flat = {}
-	self.tree:flatten(0, flat)
-	self.flat = flat
-
-	self.layout:fit_sidebar(render(buf, flat, self.config.highlights))
-end
-
----@param path string?
----@return integer?
-function Browser:index_of(path)
-	if not self.flat or not path then
-		return nil
-	end
-
-	for i, item in ipairs(self.flat) do
-		if item.node.path == path then
-			return i
-		end
+	if self.list and buf and vim.api.nvim_buf_is_valid(buf) then
+		self.list:draw(buf)
 	end
 end
 
----@return TreeFlatItem?
-function Browser:selected_item()
-	local line = self.layout:sidebar_cursor()
-	return line and self.flat and self.flat[line]
+---@return integer? line sidebar line of the file the diff is open for
+function Browser:current_line()
+	return self.list and self.current_path and self.list:line_of(self.current_path)
 end
 
 ---@return GitEntry?
 function Browser:selected_entry()
-	local item = self:selected_item()
-	if not item or item.node.is_dir then
-		return nil
-	end
-	return item.node.entry
+	return self.list and self.list:entry(self.layout:sidebar_cursor())
 end
 
 function Browser:refresh()
-	if not self.repo or not self.layout:has_sidebar() then
+	local list = self.list
+	if not self.repo or not list or not self.layout:has_sidebar() then
 		return
 	end
 
@@ -108,21 +82,13 @@ function Browser:refresh()
 		return
 	end
 
-	local selected = self:selected_item()
+	local selected = list:row(self.layout:sidebar_cursor())
 
-	local collapsed = {}
-	if self.tree then
-		self.tree:collect_collapsed(collapsed)
-	end
+	list:update(entries)
+	self:draw_list()
 
-	self.tree = TreeNode.new(entries)
-	self.tree:sort()
-	self.tree:apply_collapsed(collapsed)
-
-	self:render_tree()
-
-	local target = selected and self:index_of(selected.node.path) or 1
-	self.layout:set_sidebar_cursor(math.min(target, math.max(#self.flat, 1)))
+	local target = selected and list:line_of(selected.node.path) or 1
+	self.layout:set_sidebar_cursor(math.min(target, math.max(#list.rows, 1)))
 end
 
 ---@param repo Git
@@ -175,37 +141,39 @@ function Browser:open_entry(entry)
 	self:set_diff_keymaps(bufs)
 end
 
----@param offset integer
+---@param offset 1|-1
 function Browser:select_offset(offset)
-	local index = self:index_of(self.current_path)
-	if not index then
+	local list = self.list
+	local line = self:current_line()
+	if not list or not line then
 		return
 	end
 
-	local i = index + offset
-	while self.flat[i] do
-		if not self.flat[i].node.is_dir then
-			self.layout:set_sidebar_cursor(i)
-			self:open_entry(self.flat[i].node.entry)
-			return
-		end
-		i = i + offset
+	local next_line = list:next_file(line, offset)
+	local entry = list:entry(next_line)
+	if not next_line or not entry then
+		return
 	end
+
+	self.layout:set_sidebar_cursor(next_line)
+	self:open_entry(entry)
 end
 
 function Browser:open_selected()
 	local line = self.layout:sidebar_cursor()
-	local item = line and self.flat and self.flat[line]
-	if not line or not item then
+	if not line or not self.list then
 		return
 	end
 
-	if item.node.is_dir then
-		item.node.expanded = not item.node.expanded
-		self:render_tree()
+	if self.list:toggle(line) then
+		self:draw_list()
 		self.layout:set_sidebar_cursor(line)
-	else
-		self:open_entry(item.node.entry)
+		return
+	end
+
+	local entry = self.list:entry(line)
+	if entry then
+		self:open_entry(entry)
 	end
 end
 
@@ -243,20 +211,16 @@ end
 function Browser:toggle_diff_style()
 	util.info(("browser diff style is %s"):format(self.layout:toggle_diff_style()))
 
-	local index = self:index_of(self.current_path)
-	if not index then
+	local entry = self.list and self.list:entry(self:current_line())
+	if not entry then
 		return
 	end
 
 	local from = vim.api.nvim_get_current_win()
-	self:open_entry(self.flat[index].node.entry)
+	self:open_entry(entry)
 	if vim.api.nvim_win_is_valid(from) then
 		vim.api.nvim_set_current_win(from)
 	end
-end
-
-function Browser:toggle_width_mode()
-	util.info(("sidebar width is %s"):format(self.layout:toggle_width_mode()))
 end
 
 function Browser:close()
@@ -294,14 +258,11 @@ function Browser:open()
 		return
 	end
 
-	local tree = TreeNode.new(entries)
-	tree:sort()
-
 	self.repo = repo
-	self.tree = tree
+	self.list = ChangeList.new(entries, self.config.highlights)
 
 	local bufnr = self.layout:open_sidebar()
-	self:render_tree()
+	self:draw_list()
 
 	vim.api.nvim_create_autocmd("BufEnter", {
 		buffer = bufnr,
@@ -323,9 +284,6 @@ function Browser:open()
 	end)
 	map(bufnr, keys.close, "DiffMagik: close browser", function()
 		self:close()
-	end)
-	map(bufnr, keys.toggle_width, "DiffMagik: toggle the sidebar width mode", function()
-		self:toggle_width_mode()
 	end)
 end
 

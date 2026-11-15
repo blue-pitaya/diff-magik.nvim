@@ -5,7 +5,6 @@
 ---@field prev_file string[] open the previous changed file, from either diff pane
 ---@field stage string[] stage the entry under the cursor, or unstage it if fully staged
 ---@field reset string[] discard every change to the entry under the cursor
----@field toggle_width string[] switch the sidebar between the expanding and constant widths
 
 ---@class DiffMagikHighlights
 ---@field added string status letter for files absent from HEAD
@@ -19,10 +18,6 @@
 ---@field file_added string added lines in the in-file diff, `DiffAdd`'s colors by default
 ---@field file_deleted string deleted lines in the in-file diff, `DiffDelete`'s colors by default
 
----@alias DiffMagikWidthMode
----| "expand" # grow the sidebar to fit the widest row
----| "constant" # keep the sidebar at its minimum width
-
 ---@alias DiffMagikDiffStyle
 ---| "split" # the working copy and the base side by side, in two panes
 ---| "inline" # one pane, with the deleted lines drawn above the added ones
@@ -32,7 +27,6 @@
 ---@field keys DiffMagikKeys
 ---@field highlights DiffMagikHighlights
 ---@field fillchar string 'fillchars' diff filler, drawn over missing lines
----@field width_mode DiffMagikWidthMode the sidebar starts in this mode
 ---@field diff_style DiffMagikDiffStyle the browser starts in this style
 ---@field fold_context integer untouched lines kept around each hunk before the browser folds the rest
 local Config = {}
@@ -46,7 +40,6 @@ local DEFAULTS = {
 		prev_file = { "2" },
 		stage = { "3" },
 		reset = { "X" },
-		toggle_width = { "N" },
 	},
 	highlights = {
 		added = "Added",
@@ -61,7 +54,6 @@ local DEFAULTS = {
 		file_deleted = "DiffMagikFileDeleted",
 	},
 	fillchar = "╱",
-	width_mode = "expand",
 	diff_style = "split",
 	fold_context = 3,
 }
@@ -76,7 +68,6 @@ function Config.new(opts)
 		keys = vim.tbl_extend("force", defaults.keys, opts.keys or {}),
 		highlights = vim.tbl_extend("force", defaults.highlights, opts.highlights or {}),
 		fillchar = opts.fillchar or defaults.fillchar,
-		width_mode = opts.width_mode or defaults.width_mode,
 		diff_style = opts.diff_style or defaults.diff_style,
 		fold_context = opts.fold_context or defaults.fold_context,
 	}, Config)

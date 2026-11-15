@@ -1,8 +1,6 @@
 local util = require("diff-magik.util")
 
-local SIDEBAR_MIN_WIDTH = 40
-local SIDEBAR_MAX_WIDTH = 50
-local SIDEBAR_MAX_RATIO = 0.5
+local SIDEBAR_WIDTH = 40
 
 local SIDEBAR_WIN_OPTS = {
 	winfixwidth = true,
@@ -23,9 +21,6 @@ local SIDEBAR_WIN_OPT_NAMES = vim.tbl_keys(SIDEBAR_WIN_OPTS)
 ---@field sidebar_buf? integer
 ---@field main_win? integer
 ---@field main_opts? table<string, any> main window options saved before the sidebar split it
----@field sidebar_width integer
----@field content_width integer width of the widest sidebar row
----@field width_mode DiffMagikWidthMode
 ---@field diff_style DiffMagikDiffStyle
 local Layout = {}
 Layout.__index = Layout
@@ -38,9 +33,6 @@ function Layout.new(config, diff_split, file_diffs)
 	return setmetatable({
 		diff_split = diff_split,
 		file_diffs = file_diffs,
-		sidebar_width = SIDEBAR_MIN_WIDTH,
-		content_width = SIDEBAR_MIN_WIDTH,
-		width_mode = config.width_mode,
 		diff_style = config.diff_style,
 	}, Layout)
 end
@@ -77,26 +69,9 @@ function Layout:forget_sidebar()
 end
 
 function Layout:apply_sidebar_width()
-	local max = math.min(SIDEBAR_MAX_WIDTH, math.max(SIDEBAR_MIN_WIDTH, math.floor(vim.o.columns * SIDEBAR_MAX_RATIO)))
-	local wanted = self.width_mode == "constant" and SIDEBAR_MIN_WIDTH or self.content_width
-	self.sidebar_width = math.min(math.max(wanted, SIDEBAR_MIN_WIDTH), max)
-
 	if self:has_sidebar() then
-		vim.api.nvim_win_set_width(self.sidebar_win, self.sidebar_width)
+		vim.api.nvim_win_set_width(self.sidebar_win, SIDEBAR_WIDTH)
 	end
-end
-
----@param width integer
-function Layout:fit_sidebar(width)
-	self.content_width = width
-	self:apply_sidebar_width()
-end
-
----@return DiffMagikWidthMode
-function Layout:toggle_width_mode()
-	self.width_mode = self.width_mode == "expand" and "constant" or "expand"
-	self:apply_sidebar_width()
-	return self.width_mode
 end
 
 ---@return DiffMagikDiffStyle
