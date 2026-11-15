@@ -1,5 +1,7 @@
 local h = require("helpers")
+local Config = require("diff-magik.config")
 local DiffSplit = require("diff-magik.diff-split")
+local Git = require("diff-magik.git")
 
 local test = h.test
 
@@ -60,12 +62,15 @@ test("an attaching LSP gets the diff folds put back", function()
 end)
 
 test("close removes the HEAD pane and restores the main window options", function()
-	local root = open_modified(function()
-		vim.wo.winhighlight = "Normal:Pmenu"
-		vim.wo.foldcolumn = "1"
-	end)
+	local root = h.repo({ ["a.lua"] = { "local a = 1", "return a" } })
+	h.write(root .. "/a.lua", { "local a = 2", "return a" })
+	local diff_split = DiffSplit.new(Config.new())
+	h.edit(root .. "/a.lua")
+	vim.wo.winhighlight = "Normal:Pmenu"
+	vim.wo.foldcolumn = "1"
+	diff_split:open_against_head(Git.from_root(root), "a.lua")
 
-	DiffSplit.close()
+	diff_split:close()
 
 	h.eq({ root .. "/a.lua" }, h.win_names())
 	h.eq("Normal:Pmenu", vim.wo.winhighlight)

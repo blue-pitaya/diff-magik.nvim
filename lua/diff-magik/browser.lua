@@ -1,74 +1,42 @@
 local Git = require("diff-magik.git")
 local TreeNode = require("diff-magik.tree")
-local Layout = require("diff-magik.layout")
 local render = require("diff-magik.render")
 local util = require("diff-magik.util")
 
----The changed-files sidebar and the diff it opens for the selected file.
 ---@class Browser
 ---@field config Config
----@field repo? Git repository shown, set by open
+---@field layout Layout
+---@field repo? Git
 ---@field tree? TreeNode
----@field flat? TreeFlatItem[] sidebar rows, in display order
----@field current_path? string file the diff is open for
----@field diff_bufs integer[] buffers of the open diff that carry the file keymaps
+---@field flat? TreeFlatItem[]
+---@field current_path? string
+---@field diff_bufs integer[]
 local Browser = {}
 Browser.__index = Browser
 
----@type table<string, { desc: string, run: fun(self: Browser) }>
-local ACTIONS = {
-	open = {
-		desc = "DiffMagik: open entry",
-		run = function(self)
-			self:open_selected()
-		end,
-	},
-	close = {
-		desc = "DiffMagik: close browser",
-		run = function(self)
-			self:close()
-		end,
-	},
-	stage = {
-		desc = "DiffMagik: stage or unstage entry",
-		run = function(self)
-			self:toggle_stage_selected()
-		end,
-	},
-	reset = {
-		desc = "DiffMagik: discard the changes to entry",
-		run = function(self)
-			self:reset_selected()
-		end,
-	},
-	next_file = {
-		desc = "DiffMagik: next changed file",
-		run = function(self)
-			self:select_offset(1)
-		end,
-	},
-	prev_file = {
-		desc = "DiffMagik: previous changed file",
-		run = function(self)
-			self:select_offset(-1)
-		end,
-	},
-	toggle_width = {
-		desc = "DiffMagik: toggle the sidebar width mode",
-		run = function(self)
-			self:toggle_width_mode()
-		end,
-	},
-}
+---@param bufnr integer
+---@param keys string[]
+---@param desc string
+---@param run fun()
+local function map(bufnr, keys, desc, run)
+	for _, key in ipairs(keys) do
+		vim.keymap.set("n", key, run, { buffer = bufnr, nowait = true, silent = true, desc = desc })
+	end
+end
 
-local SIDEBAR_ACTIONS = { "open", "stage", "reset", "close", "toggle_width" }
-local DIFF_ACTIONS = { "next_file", "prev_file" }
+---@param bufnr integer
+---@param keys string[]
+local function unmap(bufnr, keys)
+	for _, key in ipairs(keys) do
+		pcall(vim.keymap.del, "n", key, { buffer = bufnr })
+	end
+end
 
----Creates the browser and its autocmds; the sidebar opens on `open`.
 ---@param config Config
+---@param layout Layout
 ---@return Browser
-function Browser.new(config)
-	local self = setmetatable({ config = config, diff_bufs = {} }, Browser)
+function Browser.new(config, layout)
+	local self = setmetatable({ config = config, layout = layout, diff_bufs = {} }, Browser)
 
 	local augroup = vim.api.nvim_create_augroup("diff-magik.browser", { clear = true })
 
@@ -76,7 +44,7 @@ function Browser.new(config)
 		group = augroup,
 		callback = function(args)
 			local winid = tonumber(args.match)
-			if winid and Layout.in_split_view(winid) then
+			if winid and self.layout:in_split_view(winid) then
 				vim.schedule(function()
 					self:close_split_view()
 				end)
@@ -88,36 +56,8 @@ function Browser.new(config)
 	return self
 end
 
----@param bufnr integer
----@param names string[]
-function Browser:set_keymaps(bufnr, names)
-	for _, name in ipairs(names) do
-		local action = ACTIONS[name]
-		for _, key in ipairs(self.config.keys[name]) do
-			vim.keymap.set("n", key, function()
-				action.run(self)
-			end, {
-				buffer = bufnr,
-				nowait = true,
-				silent = true,
-				desc = action.desc,
-			})
-		end
-	end
-end
-
----@param bufnr integer
----@param names string[]
-function Browser:del_keymaps(bufnr, names)
-	for _, name in ipairs(names) do
-		for _, key in ipairs(self.config.keys[name]) do
-			pcall(vim.keymap.del, "n", key, { buffer = bufnr })
-		end
-	end
-end
-
 function Browser:render_tree()
-	local buf = Layout.sidebar_buf()
+	local buf = self.layout:get_sidebar_buf()
 	if not buf or not vim.api.nvim_buf_is_valid(buf) then
 		return
 	end
@@ -126,7 +66,7 @@ function Browser:render_tree()
 	self.tree:flatten(0, flat)
 	self.flat = flat
 
-	Layout.fit_sidebar(render(buf, flat, self.config.highlights))
+	self.layout:fit_sidebar(render(buf, flat, self.config.highlights))
 end
 
 ---@param path string?
@@ -145,7 +85,7 @@ end
 
 ---@return TreeFlatItem?
 function Browser:selected_item()
-	local line = Layout.sidebar_cursor()
+	local line = self.layout:sidebar_cursor()
 	return line and self.flat and self.flat[line]
 end
 
@@ -159,7 +99,7 @@ function Browser:selected_entry()
 end
 
 function Browser:refresh()
-	if not self.repo or not Layout.has_sidebar() then
+	if not self.repo or not self.layout:has_sidebar() then
 		return
 	end
 
@@ -182,7 +122,7 @@ function Browser:refresh()
 	self:render_tree()
 
 	local target = selected and self:index_of(selected.node.path) or 1
-	Layout.set_sidebar_cursor(math.min(target, math.max(#self.flat, 1)))
+	self.layout:set_sidebar_cursor(math.min(target, math.max(#self.flat, 1)))
 end
 
 ---@param repo Git
@@ -200,7 +140,8 @@ end
 function Browser:clear_diff_keymaps()
 	for _, buf in ipairs(self.diff_bufs) do
 		if vim.api.nvim_buf_is_valid(buf) then
-			self:del_keymaps(buf, DIFF_ACTIONS)
+			unmap(buf, self.config.keys.next_file)
+			unmap(buf, self.config.keys.prev_file)
 		end
 	end
 	self.diff_bufs = {}
@@ -210,8 +151,14 @@ end
 function Browser:set_diff_keymaps(bufs)
 	self:clear_diff_keymaps()
 
+	local keys = self.config.keys
 	for _, buf in ipairs(bufs) do
-		self:set_keymaps(buf, DIFF_ACTIONS)
+		map(buf, keys.next_file, "DiffMagik: next changed file", function()
+			self:select_offset(1)
+		end)
+		map(buf, keys.prev_file, "DiffMagik: previous changed file", function()
+			self:select_offset(-1)
+		end)
 	end
 
 	self.diff_bufs = bufs
@@ -219,7 +166,7 @@ end
 
 ---@param entry GitEntry
 function Browser:open_entry(entry)
-	local bufs = Layout.open_file(self.repo, entry.path)
+	local bufs = self.layout:open_file(self.repo, entry.path)
 	if not bufs then
 		return
 	end
@@ -238,7 +185,7 @@ function Browser:select_offset(offset)
 	local i = index + offset
 	while self.flat[i] do
 		if not self.flat[i].node.is_dir then
-			Layout.set_sidebar_cursor(i)
+			self.layout:set_sidebar_cursor(i)
 			self:open_entry(self.flat[i].node.entry)
 			return
 		end
@@ -247,7 +194,7 @@ function Browser:select_offset(offset)
 end
 
 function Browser:open_selected()
-	local line = Layout.sidebar_cursor()
+	local line = self.layout:sidebar_cursor()
 	local item = line and self.flat and self.flat[line]
 	if not line or not item then
 		return
@@ -256,7 +203,7 @@ function Browser:open_selected()
 	if item.node.is_dir then
 		item.node.expanded = not item.node.expanded
 		self:render_tree()
-		Layout.set_sidebar_cursor(line)
+		self.layout:set_sidebar_cursor(line)
 	else
 		self:open_entry(item.node.entry)
 	end
@@ -287,14 +234,14 @@ function Browser:reset_selected()
 	end
 
 	if self.current_path == entry.path then
-		Layout.reload_main()
+		self.layout:reload_main()
 	end
 
 	self:refresh()
 end
 
 function Browser:toggle_diff_style()
-	util.info(("browser diff style is %s"):format(Layout.toggle_diff_style()))
+	util.info(("browser diff style is %s"):format(self.layout:toggle_diff_style()))
 
 	local index = self:index_of(self.current_path)
 	if not index then
@@ -309,22 +256,21 @@ function Browser:toggle_diff_style()
 end
 
 function Browser:toggle_width_mode()
-	util.info(("sidebar width is %s"):format(Layout.toggle_width_mode()))
+	util.info(("sidebar width is %s"):format(self.layout:toggle_width_mode()))
 end
 
 function Browser:close()
 	self:clear_diff_keymaps()
-	Layout.close()
+	self.layout:close()
 end
 
 function Browser:close_split_view()
 	self:clear_diff_keymaps()
-	Layout.close_split_view()
+	self.layout:close_split_view()
 end
 
----Opens the sidebar for the repository of the current buffer, or focuses it when already open.
 function Browser:open()
-	if Layout.focus_sidebar() then
+	if self.layout:focus_sidebar() then
 		return
 	end
 
@@ -354,7 +300,7 @@ function Browser:open()
 	self.repo = repo
 	self.tree = tree
 
-	local bufnr = Layout.open_sidebar()
+	local bufnr = self.layout:open_sidebar()
 	self:render_tree()
 
 	vim.api.nvim_create_autocmd("BufEnter", {
@@ -365,7 +311,22 @@ function Browser:open()
 		desc = "DiffMagik: refresh the changed-file list",
 	})
 
-	self:set_keymaps(bufnr, SIDEBAR_ACTIONS)
+	local keys = self.config.keys
+	map(bufnr, keys.open, "DiffMagik: open entry", function()
+		self:open_selected()
+	end)
+	map(bufnr, keys.stage, "DiffMagik: stage or unstage entry", function()
+		self:toggle_stage_selected()
+	end)
+	map(bufnr, keys.reset, "DiffMagik: discard the changes to entry", function()
+		self:reset_selected()
+	end)
+	map(bufnr, keys.close, "DiffMagik: close browser", function()
+		self:close()
+	end)
+	map(bufnr, keys.toggle_width, "DiffMagik: toggle the sidebar width mode", function()
+		self:toggle_width_mode()
+	end)
 end
 
 return Browser

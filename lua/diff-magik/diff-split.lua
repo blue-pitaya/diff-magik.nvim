@@ -1,18 +1,13 @@
 local util = require("diff-magik.util")
 local BufferOrigin = require("diff-magik.buffer-origin")
+local DiffSplitPanes = require("diff-magik.diff-split-panes")
 
-local MAIN_OPTS = { "fillchars", "winhighlight", "foldcolumn" }
-
----@class DiffSplitState
----@field config Config set by setup
----@field head_win? integer
----@field main_win? integer
----@field main_buf? integer
----@field main_opts? table<string, any>
----@field opening? boolean
-local state = {}
-
-local M = {}
+---@class DiffSplit
+---@field config Config
+---@field panes? DiffSplitPanes the open split; nil while none is open
+---@field opening boolean true while open_against_head builds the panes
+local DiffSplit = {}
+DiffSplit.__index = DiffSplit
 
 ---@param winid integer
 ---@param char string
@@ -62,73 +57,17 @@ local function diff_off(winid)
 	end)
 end
 
-local function restore_main_opts()
-	if state.main_opts and state.main_win ~= nil and vim.api.nvim_win_is_valid(state.main_win) then
-		util.set_wo(state.main_win, state.main_opts)
-	end
-end
-
----@return boolean
-local function showing_main_buf()
-	return state.main_win ~= nil and vim.api.nvim_win_is_valid(state.main_win)
-		and state.main_buf ~= nil
-		and vim.api.nvim_win_get_buf(state.main_win) == state.main_buf
-end
-
----@return integer?
-function M.close()
-	local main_buf = state.main_buf
-
-	diff_off(state.main_win)
-	restore_main_opts()
-
-	if state.head_win ~= nil and vim.api.nvim_win_is_valid(state.head_win) then
-		pcall(vim.api.nvim_win_close, state.head_win, true)
-	end
-
-	state.head_win = nil
-	state.main_win = nil
-	state.main_buf = nil
-	state.main_opts = nil
-
-	return main_buf
-end
-
-local function sync()
-	if state.opening then
-		return
-	end
-
-	if state.main_win == nil or not vim.api.nvim_win_is_valid(state.main_win) or not state.main_buf then
-		return
-	end
-
-	if state.head_win == nil or not vim.api.nvim_win_is_valid(state.head_win) then
-		M.close()
-		return
-	end
-
-	if showing_main_buf() then
-		local config = state.config
-		diff_on(state.main_win, config.highlights.main_win, config.fillchar)
-		diff_on(state.head_win, config.highlights.head_win, config.fillchar)
-	else
-		diff_off(state.main_win)
-		restore_main_opts()
-		diff_off(state.head_win)
-	end
-end
-
 ---@param config Config
-function M.setup(config)
-	state.config = config
+---@return DiffSplit
+function DiffSplit.new(config)
+	local self = setmetatable({ config = config, opening = false }, DiffSplit)
 
 	local augroup = vim.api.nvim_create_augroup("diff-magik.diff-split", { clear = true })
 
 	vim.api.nvim_create_autocmd({ "BufEnter", "BufWinEnter" }, {
 		group = augroup,
 		callback = function()
-			sync()
+			self:sync()
 		end,
 		desc = "DiffMagik: keep diff mode bound to the file the HEAD pane was opened for",
 	})
@@ -136,19 +75,59 @@ function M.setup(config)
 	vim.api.nvim_create_autocmd("LspAttach", {
 		group = augroup,
 		callback = function()
-			vim.schedule(sync)
+			vim.schedule(function()
+				self:sync()
+			end)
 		end,
 		desc = "DiffMagik: restore the diff folds an attaching LSP would take over",
 	})
+
+	return self
 end
 
----@param winid integer
+---@return integer? main_buf buffer the HEAD pane was opened for
+function DiffSplit:close()
+	local panes = self.panes
+	if not panes then
+		return nil
+	end
+	self.panes = nil
+
+	diff_off(panes.main_win)
+	panes:restore_main_opts()
+
+	if panes:head_valid() then
+		pcall(vim.api.nvim_win_close, panes.head_win, true)
+	end
+
+	return panes.main_buf
+end
+
+function DiffSplit:sync()
+	local panes = self.panes
+	if self.opening or not panes or not panes:main_valid() then
+		return
+	end
+
+	if not panes:head_valid() then
+		self:close()
+		return
+	end
+
+	if panes:showing_main_buf() then
+		diff_on(panes.main_win, self.config.highlights.main_win, self.config.fillchar)
+		diff_on(panes.head_win, self.config.highlights.head_win, self.config.fillchar)
+	else
+		diff_off(panes.main_win)
+		panes:restore_main_opts()
+		diff_off(panes.head_win)
+	end
+end
+
+---@param winid integer?
 ---@return boolean
-function M.contains(winid)
-	return not state.opening
-		and state.head_win ~= nil and vim.api.nvim_win_is_valid(state.head_win)
-		and state.main_win ~= nil and vim.api.nvim_win_is_valid(state.main_win)
-		and (winid == state.head_win or winid == state.main_win)
+function DiffSplit:contains(winid)
+	return not self.opening and self.panes ~= nil and self.panes:contains(winid)
 end
 
 ---@param repo Git
@@ -156,33 +135,34 @@ end
 ---@param lines string[]
 ---@param label string
 ---@return integer
-local function split_head(repo, rel, lines, label)
+function DiffSplit:split_head(repo, rel, lines, label)
 	local main_win = vim.api.nvim_get_current_win()
 	local bufnr = vim.api.nvim_get_current_buf()
 
-	if state.head_win ~= nil and vim.api.nvim_win_is_valid(state.head_win) then
-		vim.api.nvim_win_close(state.head_win, true)
+	local previous = self.panes
+	if previous then
+		if previous:head_valid() then
+			vim.api.nvim_win_close(previous.head_win, true)
+		end
+		previous:restore_main_opts()
+		self.panes = nil
 	end
-
-	restore_main_opts()
 	vim.cmd.diffoff({ bang = true })
-
-	state.main_win = main_win
-	state.main_buf = bufnr
-	state.main_opts = util.save_wo(main_win, MAIN_OPTS)
 
 	local origin = BufferOrigin.new(repo.root, rel)
 	origin:tag(bufnr)
 
 	vim.cmd.vsplit()
-	state.head_win = vim.api.nvim_get_current_win()
+	local head_win = vim.api.nvim_get_current_win()
+	self.panes = DiffSplitPanes.new(main_win, bufnr, head_win)
+
 	local head_buf = util.scratch_buf(("diffmagik://%s@%s"):format(rel, label))
 	vim.api.nvim_buf_set_lines(head_buf, 0, -1, false, lines)
 	vim.bo[head_buf].filetype = vim.bo[bufnr].filetype
 	vim.bo[head_buf].modifiable = false
 	origin:tag(head_buf)
 
-	vim.api.nvim_win_set_buf(state.head_win, head_buf)
+	vim.api.nvim_win_set_buf(head_win, head_buf)
 	vim.api.nvim_set_current_win(main_win)
 
 	return head_buf
@@ -190,25 +170,25 @@ end
 
 ---@param repo Git
 ---@param rel string
----@return integer?
-function M.open_against_head(repo, rel)
+---@return integer? head_buf
+function DiffSplit:open_against_head(repo, rel)
 	local base, err = repo:base_lines(rel)
 	if err ~= nil then
 		util.error(err)
 		return nil
 	end
 
-	state.opening = true
-	local ok, head_buf = pcall(split_head, repo, rel, base.lines, base.label)
-	state.opening = false
+	self.opening = true
+	local ok, head_buf = pcall(self.split_head, self, repo, rel, base.lines, base.label)
+	self.opening = false
 
 	if not ok then
 		util.error(head_buf)
 		return nil
 	end
 
-	sync()
+	self:sync()
 	return head_buf
 end
 
-return M
+return DiffSplit

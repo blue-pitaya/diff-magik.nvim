@@ -1,11 +1,11 @@
 local h = require("helpers")
+local Config = require("diff-magik.config")
 local Git = require("diff-magik.git")
-local FileDiff = require("diff-magik.file-diff")
+local FileDiffManager = require("diff-magik.file-diff-manager")
 
 local test = h.test
 
 local ns = vim.api.nvim_create_namespace("diff-magik.file-diff")
-local FOLDEXPR = "v:lua.require'diff-magik.file-diff'.foldexpr(v:lnum)"
 local ADDED = "DiffMagikFileAdded"
 local DELETED = "DiffMagikFileDeleted"
 
@@ -20,22 +20,23 @@ end
 ---@param original string[]
 ---@param changed string[]
 ---@param before_attach? fun()
----@return integer
----@return integer
+---@return integer view
+---@return integer source
+---@return FileDiffManager file_diffs
 local function attach(original, changed, before_attach)
 	local root = h.repo({ ["a.txt"] = original })
 	h.write(root .. "/a.txt", changed)
 
-	require("diff-magik").setup()
+	local file_diffs = FileDiffManager.new(Config.new())
 	h.edit(root .. "/a.txt")
 	if before_attach then
 		before_attach()
 	end
 	local source = vim.api.nvim_get_current_buf()
-	local view, err = FileDiff.attach(Git.from_root(root), "a.txt", source)
+	local view, err = file_diffs:attach(Git.from_root(root), "a.txt", source)
 	assert(err == nil, err)
 
-	return view, source
+	return view, source, file_diffs
 end
 
 ---@param before_attach? fun()
@@ -105,27 +106,34 @@ test("the cursor moves onto the deleted lines", function()
 	h.eq("line 10", vim.api.nvim_get_current_line())
 end)
 
+---Fold level of each view line in the current window, against what changing line 10 should give:
+---the hunk (view lines 10-11) and 3 lines of context either side unfolded, the rest folded.
+local function fold_levels()
+	local levels = {}
+	local expected = {}
+	for lnum = 1, 21 do
+		table.insert(levels, vim.fn.foldlevel(lnum))
+		table.insert(expected, (lnum >= 7 and lnum <= 14) and 0 or 1)
+	end
+	return levels, expected
+end
+
 test("attach folds everything but the hunk and its context", function()
 	attach_changed_line_10()
 
-	local folds = {}
-	local expected = {}
-	for lnum = 1, 21 do
-		table.insert(folds, FileDiff.foldexpr(lnum))
-		table.insert(expected, (lnum >= 7 and lnum <= 14) and "0" or "1")
-	end
+	local levels, expected = fold_levels()
 
-	h.eq("expr", vim.wo.foldmethod)
-	h.eq(expected, folds)
+	h.eq("manual", vim.wo.foldmethod)
+	h.eq(expected, levels)
 end)
 
 test("detach restores the fold options the window had before", function()
-	local view = attach_changed_line_10(function()
+	local view, _, file_diffs = attach_changed_line_10(function()
 		vim.wo.foldmethod = "indent"
 		vim.wo.foldlevel = 2
 	end)
 
-	FileDiff.detach(view)
+	file_diffs:detach(view)
 
 	h.eq("indent", vim.wo.foldmethod)
 	h.eq(2, vim.wo.foldlevel)
@@ -133,13 +141,16 @@ end)
 
 test("an attaching LSP gets the hunk folds put back", function()
 	local view = attach_changed_line_10()
+	vim.wo.foldmethod = "expr"
 	vim.wo.foldexpr = "v:lua.vim.lsp.foldexpr()"
 
 	vim.api.nvim_exec_autocmds("LspAttach", { buffer = view, data = { client_id = 0 } })
 	h.flush()
 
-	h.eq("expr", vim.wo.foldmethod)
-	h.eq(FOLDEXPR, vim.wo.foldexpr)
+	local levels, expected = fold_levels()
+
+	h.eq("manual", vim.wo.foldmethod)
+	h.eq(expected, levels)
 end)
 
 test("editing the file redraws the diff", function()

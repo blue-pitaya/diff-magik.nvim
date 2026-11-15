@@ -1,7 +1,7 @@
 local Git = require("diff-magik.git")
 local BufferOrigin = require("diff-magik.buffer-origin")
 local DiffSplit = require("diff-magik.diff-split")
-local FileDiff = require("diff-magik.file-diff")
+local FileDiffManager = require("diff-magik.file-diff-manager")
 local Layout = require("diff-magik.layout")
 local Browser = require("diff-magik.browser")
 local util = require("diff-magik.util")
@@ -13,10 +13,10 @@ local M = {}
 function M.setup(opts)
 	local config = Config.new(opts)
 
-	DiffSplit.setup(config)
-	FileDiff.setup(config)
-	Layout.setup(config)
-	local browser = Browser.new(config)
+	local diff_split = DiffSplit.new(config)
+	local file_diffs = FileDiffManager.new(config)
+	local layout = Layout.new(config, diff_split, file_diffs)
+	local browser = Browser.new(config, layout)
 
 	vim.api.nvim_create_user_command("DiffMagikOpen", function()
 		local origin, err = BufferOrigin.of(vim.api.nvim_get_current_buf())
@@ -24,7 +24,7 @@ function M.setup(opts)
 			util.error(err)
 			return
 		end
-		DiffSplit.open_against_head(Git.from_root(origin.root), origin.rel)
+		diff_split:open_against_head(Git.from_root(origin.root), origin.rel)
 	end, {
 		desc = "Diff the current buffer's file against git HEAD",
 	})
