@@ -16,7 +16,7 @@ function M.setup(opts)
 	DiffSplit.setup(config)
 	FileDiff.setup(config)
 	Layout.setup(config)
-	Browser.setup(config)
+	local browser = Browser.new(config)
 
 	vim.api.nvim_create_user_command("DiffMagikOpen", function()
 		local origin, err = BufferOrigin.of(vim.api.nvim_get_current_buf())
@@ -36,18 +36,18 @@ function M.setup(opts)
 				util.error(err)
 				return
 			end
-			Browser.toggle_stage(Git.from_root(origin.root), origin.rel)
+			browser:toggle_stage(Git.from_root(origin.root), origin.rel)
 		end, { desc = "DiffMagik: stage or unstage the current file" })
 	end
 
 	vim.api.nvim_create_user_command("DiffMagikBrowser", function()
-		Browser.open()
+		browser:open()
 	end, {
 		desc = "Open a sidebar browser of all changed files vs git HEAD",
 	})
 
 	vim.api.nvim_create_user_command("DiffMagikBrowserDiffToggle", function()
-		Browser.toggle_diff_style()
+		browser:toggle_diff_style()
 	end, {
 		desc = "Switch the browser between the two-pane and single-pane diff styles",
 	})
