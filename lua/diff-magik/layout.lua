@@ -1,5 +1,5 @@
-local DiffSplit = require("diff-magik.diffsplit")
-local FileDiff = require("diff-magik.filediff")
+local DiffSplit = require("diff-magik.diff-split")
+local FileDiff = require("diff-magik.file-diff")
 local util = require("diff-magik.util")
 local config = require("diff-magik.config")
 

@@ -1,5 +1,6 @@
 local config = require("diff-magik.config")
 local util = require("diff-magik.util")
+local BufferOrigin = require("diff-magik.buffer-origin")
 
 local win_valid = util.win_valid
 
@@ -119,7 +120,7 @@ local function sync()
 end
 
 function M.setup()
-	local augroup = vim.api.nvim_create_augroup("diff-magik.diffsplit", { clear = true })
+	local augroup = vim.api.nvim_create_augroup("diff-magik.diff-split", { clear = true })
 
 	vim.api.nvim_create_autocmd({ "BufEnter", "BufWinEnter" }, {
 		group = augroup,
@@ -167,7 +168,8 @@ local function split_head(repo, rel, lines, label)
 	state.main_buf = bufnr
 	state.main_opts = util.save_wo(main_win, MAIN_OPTS)
 
-	util.tag_buffer(bufnr, repo.root, rel)
+	local origin = BufferOrigin.new(repo.root, rel)
+	origin:tag(bufnr)
 
 	vim.cmd.vsplit()
 	state.head_win = vim.api.nvim_get_current_win()
@@ -175,7 +177,7 @@ local function split_head(repo, rel, lines, label)
 	vim.api.nvim_buf_set_lines(head_buf, 0, -1, false, lines)
 	vim.bo[head_buf].filetype = vim.bo[bufnr].filetype
 	vim.bo[head_buf].modifiable = false
-	util.tag_buffer(head_buf, repo.root, rel)
+	origin:tag(head_buf)
 
 	vim.api.nvim_win_set_buf(state.head_win, head_buf)
 	vim.api.nvim_set_current_win(main_win)

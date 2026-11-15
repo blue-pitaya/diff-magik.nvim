@@ -52,19 +52,4 @@ function M.scratch_buf(name)
 	return buf
 end
 
----@param bufnr integer
----@param root string
----@param rel string
-function M.tag_buffer(bufnr, root, rel)
-	vim.b[bufnr].diffmagik_root = root
-	vim.b[bufnr].diffmagik_path = rel
-end
-
----@param bufnr integer
----@return string?
----@return string?
-function M.buffer_target(bufnr)
-	return vim.b[bufnr].diffmagik_root, vim.b[bufnr].diffmagik_path
-end
-
 return M

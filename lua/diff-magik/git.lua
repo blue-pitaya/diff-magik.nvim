@@ -1,4 +1,4 @@
-local util = require("diff-magik.util")
+local BufferOrigin = require("diff-magik.buffer-origin")
 
 ---@class Git
 ---@field root string
@@ -40,19 +40,13 @@ local function existing_dir(dir)
 	return dir
 end
 
----@param dir string
-function Git.new(dir)
-	dir = existing_dir(dir)
-	if not dir then
-		return nil
-	end
-
-	local out = run({ "-C", dir, "rev-parse", "--show-toplevel" })
-	local root = out and out[1] or nil
-	if not root then
-		return nil
-	end
-	return setmetatable({ root = root }, Git)
+---@param path string
+---@return Git?
+function Git.new(path)
+	local dir = existing_dir(path)
+	local out = dir and run({ "-C", dir, "rev-parse", "--show-toplevel" })
+	local root = out and out[1]
+	return root and Git.from_root(root) or nil
 end
 
 ---@param root string
@@ -65,9 +59,9 @@ end
 ---@return string?
 ---@return string?
 function Git.for_buffer(bufnr)
-	local root, rel = util.buffer_target(bufnr)
-	if root and rel then
-		return Git.from_root(root), rel
+	local origin = BufferOrigin.of(bufnr)
+	if origin then
+		return Git.from_root(origin.root), origin.rel
 	end
 
 	local path = vim.api.nvim_buf_get_name(bufnr)

@@ -1,5 +1,5 @@
 local h = require("helpers")
-local DiffSplit = require("diff-magik.diffsplit")
+local DiffSplit = require("diff-magik.diff-split")
 
 local test = h.test
 

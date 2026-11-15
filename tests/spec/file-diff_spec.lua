@@ -1,11 +1,11 @@
 local h = require("helpers")
 local Git = require("diff-magik.git")
-local FileDiff = require("diff-magik.filediff")
+local FileDiff = require("diff-magik.file-diff")
 
 local test = h.test
 
-local ns = vim.api.nvim_create_namespace("diff-magik.filediff")
-local FOLDEXPR = "v:lua.require'diff-magik.filediff'.foldexpr(v:lnum)"
+local ns = vim.api.nvim_create_namespace("diff-magik.file-diff")
+local FOLDEXPR = "v:lua.require'diff-magik.file-diff'.foldexpr(v:lnum)"
 local ADDED = "DiffMagikFileAdded"
 local DELETED = "DiffMagikFileDeleted"
 

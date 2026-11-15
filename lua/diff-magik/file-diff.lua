@@ -1,7 +1,8 @@
 local config = require("diff-magik.config")
 local util = require("diff-magik.util")
+local BufferOrigin = require("diff-magik.buffer-origin")
 
-local ns = vim.api.nvim_create_namespace("diff-magik.filediff")
+local ns = vim.api.nvim_create_namespace("diff-magik.file-diff")
 
 local COPIED_HL = {
 	DiffMagikFileAdded = "DiffAdd",
@@ -16,7 +17,7 @@ end
 
 local FOLD_OPTS = {
 	foldmethod = "expr",
-	foldexpr = "v:lua.require'diff-magik.filediff'.foldexpr(v:lnum)",
+	foldexpr = "v:lua.require'diff-magik.file-diff'.foldexpr(v:lnum)",
 	foldenable = true,
 	foldlevel = 0,
 }
@@ -222,7 +223,7 @@ function M.clear()
 end
 
 function M.setup()
-	local augroup = vim.api.nvim_create_augroup("diff-magik.filediff", { clear = true })
+	local augroup = vim.api.nvim_create_augroup("diff-magik.file-diff", { clear = true })
 
 	define_hl()
 
@@ -287,7 +288,7 @@ function M.attach(repo, rel, bufnr)
 	if not view then
 		view = util.scratch_buf(("diffmagik://%s@%s:inline"):format(rel, label))
 		vim.bo[view].filetype = vim.bo[bufnr].filetype
-		util.tag_buffer(view, repo.root, rel)
+		BufferOrigin.new(repo.root, rel):tag(view)
 	end
 
 	state.active[view] = {

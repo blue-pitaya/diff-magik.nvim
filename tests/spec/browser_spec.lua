@@ -128,7 +128,7 @@ test("the inline diff style shows the deleted and added lines in one pane", func
 	h.press("<CR>")
 
 	local view = h.buf_named("diffmagik://a.txt@HEAD:inline")
-	local ns = vim.api.nvim_create_namespace("diff-magik.filediff")
+	local ns = vim.api.nvim_create_namespace("diff-magik.file-diff")
 	local highlighted = {}
 	for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(view, ns, 0, -1, { details = true })) do
 		table.insert(highlighted, { mark[2], mark[4].line_hl_group })
