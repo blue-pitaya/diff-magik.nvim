@@ -120,23 +120,39 @@ test("reset discards the changes to the entry once confirmed", function()
 	}, sidebar_lines())
 end)
 
-test("the inline diff style draws the diff into the working copy", function()
-	local root = open_browser()
+test("the inline diff style shows the deleted and added lines in one pane", function()
+	open_browser()
 	vim.cmd.DiffMagikBrowserDiffToggle()
 
 	select_line(3)
 	h.press("<CR>")
 
+	local view = h.buf_named("diffmagik://a.txt@HEAD:inline")
 	local ns = vim.api.nvim_create_namespace("diff-magik.filediff")
-	local added = {}
-	for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(h.buf_named(root .. "/a.txt"), ns, 0, -1, { details = true })) do
-		if mark[4].line_hl_group then
-			table.insert(added, { mark[2], mark[4].line_hl_group })
-		end
+	local highlighted = {}
+	for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(view, ns, 0, -1, { details = true })) do
+		table.insert(highlighted, { mark[2], mark[4].line_hl_group })
 	end
 
-	h.eq({ root .. "/a.txt", SIDEBAR }, h.win_names())
-	h.eq({ { 0, "DiffMagikFileAdded" } }, added)
+	h.eq({ "diffmagik://a.txt@HEAD:inline", SIDEBAR }, h.win_names())
+	h.eq({ "a", "a2" }, h.lines(view))
+	h.eq({ { 0, "DiffMagikFileDeleted" }, { 1, "DiffMagikFileAdded" } }, highlighted)
+end)
+
+test("reset redraws the inline diff from the reverted file", function()
+	local root = open_browser()
+	vim.cmd.DiffMagikBrowserDiffToggle()
+	vim.fn.confirm = function()
+		return 1
+	end
+
+	select_line(3)
+	h.press("<CR>")
+	select_line(3)
+	h.press("X")
+
+	h.eq({ "a" }, h.lines(h.buf_named("diffmagik://a.txt@HEAD:inline")))
+	h.eq({ "a" }, h.read(root .. "/a.txt"))
 end)
 
 test("closing the HEAD pane closes the whole split view", function()
@@ -190,8 +206,8 @@ test("switching the diff style reopens the current file in the new style", funct
 
 	vim.cmd.DiffMagikBrowserDiffToggle()
 
-	h.eq({ root .. "/a.txt", SIDEBAR }, h.win_names())
-	h.eq(root .. "/a.txt", vim.api.nvim_buf_get_name(0))
+	h.eq({ "diffmagik://a.txt@HEAD:inline", SIDEBAR }, h.win_names())
+	h.eq("diffmagik://a.txt@HEAD:inline", vim.api.nvim_buf_get_name(0))
 end)
 
 test("closing the sidebar closes the whole split view", function()
@@ -251,7 +267,7 @@ test("DiffMagikBrowserSizeToggle switches between the fitted and the constant wi
 	vim.cmd.DiffMagikBrowser()
 	local win = h.win_of(h.buf_named(SIDEBAR))
 
-	h.eq(67, vim.api.nvim_win_get_width(win))
+	h.eq(50, vim.api.nvim_win_get_width(win))
 
 	vim.cmd.DiffMagikBrowserSizeToggle()
 	h.eq(40, vim.api.nvim_win_get_width(win))

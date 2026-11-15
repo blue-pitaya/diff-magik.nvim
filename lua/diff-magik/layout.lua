@@ -7,6 +7,7 @@ local win_valid = util.win_valid
 local is_floating = util.is_floating
 
 local SIDEBAR_MIN_WIDTH = 40
+local SIDEBAR_MAX_WIDTH = 50
 local SIDEBAR_MAX_RATIO = 0.5
 
 local SIDEBAR_WIN_OPTS = {
@@ -14,7 +15,7 @@ local SIDEBAR_WIN_OPTS = {
 	number = false,
 	relativenumber = false,
 	signcolumn = "no",
-	wrap = false,
+	wrap = true,
 	cursorline = true,
 	cursorlineopt = "line",
 }
@@ -57,7 +58,7 @@ local function forget_sidebar()
 end
 
 local function apply_sidebar_width()
-	local max = math.max(SIDEBAR_MIN_WIDTH, math.floor(vim.o.columns * SIDEBAR_MAX_RATIO))
+	local max = math.min(SIDEBAR_MAX_WIDTH, math.max(SIDEBAR_MIN_WIDTH, math.floor(vim.o.columns * SIDEBAR_MAX_RATIO)))
 	local wanted = state.width_mode == "constant" and SIDEBAR_MIN_WIDTH or state.content_width
 	state.sidebar_width = math.min(math.max(wanted, SIDEBAR_MIN_WIDTH), max)
 
@@ -193,8 +194,7 @@ function M.open_file(repo, rel)
 	local bufnr = vim.api.nvim_win_get_buf(main_win)
 
 	if state.diff_style == "inline" then
-		FileDiff.attach(repo, rel, bufnr)
-		return { bufnr }
+		return { FileDiff.attach(repo, rel, bufnr) or bufnr }
 	end
 
 	FileDiff.detach(bufnr)
@@ -205,6 +205,14 @@ end
 
 function M.reload_main()
 	if not win_valid(state.main_win) then
+		return
+	end
+
+	local source = FileDiff.source(vim.api.nvim_win_get_buf(state.main_win))
+	if source then
+		vim.api.nvim_buf_call(source, function()
+			pcall(vim.cmd.edit, { bang = true })
+		end)
 		return
 	end
 

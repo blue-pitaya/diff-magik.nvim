@@ -24,6 +24,7 @@ local FOLD_OPTS = {
 local FOLD_OPT_NAMES = vim.tbl_keys(FOLD_OPTS)
 
 ---@class FileDiffState
+---@field source integer
 ---@field base string
 ---@field base_lines string[]
 ---@field keep? table<integer, boolean>
@@ -57,54 +58,24 @@ local function as_text(lines)
 	return table.concat(lines, "\n") .. "\n"
 end
 
----@param line string
----@param tabstop integer
-local function expand_tabs(line, tabstop)
-	local col = line:find("\t", 1, true)
-	while col do
-		local pad = tabstop - vim.fn.strdisplaywidth(line:sub(1, col - 1)) % tabstop
-		line = line:sub(1, col - 1) .. (" "):rep(pad) .. line:sub(col + 1)
-		col = line:find("\t", 1, true)
-	end
-	return line
-end
-
----@param bufnr integer
----@param hunks integer[][]
+---@param ranges integer[][]
+---@param total integer
 ---@return table<integer, boolean>?
-local function unfolded_lines(bufnr, hunks)
-	if #hunks == 0 then
+local function unfolded_lines(ranges, total)
+	if #ranges == 0 then
 		return nil
 	end
 
-	local total = vim.api.nvim_buf_line_count(bufnr)
 	local context = config.options.fold_context
 	local keep = {}
 
-	for _, hunk in ipairs(hunks) do
-		local start_b, count_b = hunk[3], hunk[4]
-		local first = math.max(start_b, 1)
-		local last = count_b > 0 and start_b + count_b - 1 or first
-
-		for lnum = math.max(first - context, 1), math.min(last + context, total) do
+	for _, range in ipairs(ranges) do
+		for lnum = math.max(range[1] - context, 1), math.min(range[2] + context, total) do
 			keep[lnum] = true
 		end
 	end
 
 	return keep
-end
-
----@param bufnr integer
----@return integer
-local function text_width(bufnr)
-	local width = 0
-	for _, winid in ipairs(vim.fn.win_findbuf(bufnr)) do
-		local info = vim.fn.getwininfo(winid)[1]
-		if info then
-			width = math.max(width, info.width - info.textoff)
-		end
-	end
-	return width
 end
 
 ---@param bufnr integer
@@ -142,53 +113,89 @@ local function restore_window(winid)
 	state.win_opts[winid] = nil
 end
 
----@param bufnr integer
-local function render(bufnr)
-	local diff = state.active[bufnr]
-	if not diff or not vim.api.nvim_buf_is_valid(bufnr) then
+---@param source integer
+---@return integer[]
+local function views_of(source)
+	local views = {}
+	for view, diff in pairs(state.active) do
+		if diff.source == source then
+			table.insert(views, view)
+		end
+	end
+	return views
+end
+
+---@param view integer
+local function render(view)
+	local diff = state.active[view]
+	if not diff or not vim.api.nvim_buf_is_valid(view) or not vim.api.nvim_buf_is_valid(diff.source) then
 		return
 	end
 
-	vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
+	if not vim.api.nvim_buf_is_loaded(diff.source) then
+		vim.fn.bufload(diff.source)
+	end
 
-	local current = as_text(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false))
+	local current = vim.api.nvim_buf_get_lines(diff.source, 0, -1, false)
 	---@type integer[][]?
-	local hunks = vim.diff(diff.base, current, { result_type = "indices" })
+	local hunks = vim.diff(diff.base, as_text(current), { result_type = "indices" })
 	if not hunks then
 		return
 	end
 
 	local hl = config.options.highlights
-	local width = text_width(bufnr)
-	local tabstop = vim.bo[bufnr].tabstop
+	local lines = {}
+	local groups = {}
+	local ranges = {}
+	local next_b = 1
 
 	for _, hunk in ipairs(hunks) do
 		local start_a, count_a, start_b, count_b = hunk[1], hunk[2], hunk[3], hunk[4]
+		local first_b = count_b > 0 and start_b or start_b + 1
 
+		for lnum = next_b, first_b - 1 do
+			table.insert(lines, current[lnum])
+		end
+
+		local first = #lines + 1
+		for i = 0, count_a - 1 do
+			table.insert(lines, diff.base_lines[start_a + i] or "")
+			groups[#lines] = hl.file_deleted
+		end
 		for i = 0, count_b - 1 do
-			vim.api.nvim_buf_set_extmark(bufnr, ns, start_b - 1 + i, 0, {
-				line_hl_group = hl.file_added,
-			})
+			table.insert(lines, current[start_b + i])
+			groups[#lines] = hl.file_added
 		end
+		table.insert(ranges, { first, #lines })
 
-		if count_a > 0 then
-			local virt_lines = {}
-			for i = 0, count_a - 1 do
-				local text = expand_tabs(diff.base_lines[start_a + i] or "", tabstop)
-				text = text .. (" "):rep(math.max(width - vim.fn.strdisplaywidth(text), 0))
-				table.insert(virt_lines, { { text, hl.file_deleted } })
-			end
-
-			local above = count_b > 0 or start_b == 0
-			vim.api.nvim_buf_set_extmark(bufnr, ns, math.max(start_b - 1, 0), 0, {
-				virt_lines = virt_lines,
-				virt_lines_above = above,
-			})
-		end
+		next_b = first_b + count_b
 	end
 
-	diff.keep = unfolded_lines(bufnr, hunks)
-	fold_windows(bufnr, false)
+	for lnum = next_b, #current do
+		table.insert(lines, current[lnum])
+	end
+
+	diff.keep = unfolded_lines(ranges, #lines)
+
+	vim.bo[view].modifiable = true
+	vim.api.nvim_buf_set_lines(view, 0, -1, false, lines)
+	vim.bo[view].modifiable = false
+
+	vim.api.nvim_buf_clear_namespace(view, ns, 0, -1)
+	for lnum, group in pairs(groups) do
+		vim.api.nvim_buf_set_extmark(view, ns, lnum - 1, 0, {
+			line_hl_group = group,
+		})
+	end
+
+	fold_windows(view, false)
+end
+
+---@param bufnr integer
+---@return integer?
+function M.source(bufnr)
+	local diff = state.active[bufnr]
+	return diff and diff.source
 end
 
 ---@param bufnr integer
@@ -228,19 +235,11 @@ function M.setup()
 	vim.api.nvim_create_autocmd({ "TextChanged", "InsertLeave", "BufReadPost" }, {
 		group = augroup,
 		callback = function(args)
-			render(args.buf)
-		end,
-		desc = "DiffMagik: keep the in-file diff in sync with the buffer",
-	})
-
-	vim.api.nvim_create_autocmd({ "WinResized", "VimResized" }, {
-		group = augroup,
-		callback = function()
-			for bufnr in pairs(state.active) do
-				render(bufnr)
+			for _, view in ipairs(views_of(args.buf)) do
+				render(view)
 			end
 		end,
-		desc = "DiffMagik: refit the in-file diff to the window",
+		desc = "DiffMagik: keep the in-file diff in sync with the file",
 	})
 
 	vim.api.nvim_create_autocmd({ "BufDelete", "BufWipeout" }, {
@@ -276,22 +275,33 @@ end
 ---@param repo Git
 ---@param rel string
 ---@param bufnr integer
+---@return integer?
 function M.attach(repo, rel, bufnr)
-	local base_lines, _, err = repo:base_lines(rel)
+	local base_lines, label, err = repo:base_lines(rel)
 	if not base_lines then
 		util.error(err)
-		return
+		return nil
 	end
 
-	state.active[bufnr] = {
+	local view = views_of(bufnr)[1]
+	if not view then
+		view = util.scratch_buf(("diffmagik://%s@%s:inline"):format(rel, label))
+		vim.bo[view].filetype = vim.bo[bufnr].filetype
+		util.tag_buffer(view, repo.root, rel)
+	end
+
+	state.active[view] = {
+		source = bufnr,
 		base = as_text(base_lines),
 		base_lines = base_lines,
 	}
 
-	util.tag_buffer(bufnr, repo.root, rel)
+	vim.api.nvim_win_set_buf(0, view)
 
-	render(bufnr)
-	fold_windows(bufnr, true)
+	render(view)
+	fold_windows(view, true)
+
+	return view
 end
 
 return M
