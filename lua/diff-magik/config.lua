@@ -6,7 +6,6 @@
 ---@field stage string[] stage the entry under the cursor, or unstage it if fully staged
 ---@field reset string[] discard every change to the entry under the cursor
 ---@field toggle_width string[] switch the sidebar between the expanding and constant widths
----@field commit string[] open the commit message in a new tab, closing it commits
 
 ---@class DiffMagikHighlights
 ---@field added string status letter for files absent from HEAD
@@ -46,7 +45,6 @@ local defaults = {
 		stage = { "3" },
 		reset = { "X" },
 		toggle_width = { "N" },
-		commit = { "<Leader>dc" },
 	},
 	highlights = {
 		added = "Added",
