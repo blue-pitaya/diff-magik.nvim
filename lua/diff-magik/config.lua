@@ -29,6 +29,7 @@
 ---@field fillchar string 'fillchars' diff filler, drawn over missing lines
 ---@field diff_style DiffMagikDiffStyle the browser starts in this style
 ---@field fold_context integer untouched lines kept around each hunk before the browser folds the rest
+---@field command_timeout integer milliseconds a git command may run before it is killed and fails
 local Config = {}
 Config.__index = Config
 
@@ -56,6 +57,7 @@ local DEFAULTS = {
 	fillchar = "╱",
 	diff_style = "split",
 	fold_context = 3,
+	command_timeout = 5000,
 }
 
 ---@param opts table?
@@ -70,6 +72,7 @@ function Config.new(opts)
 		fillchar = opts.fillchar or defaults.fillchar,
 		diff_style = opts.diff_style or defaults.diff_style,
 		fold_context = opts.fold_context or defaults.fold_context,
+		command_timeout = opts.command_timeout or defaults.command_timeout,
 	}, Config)
 end
 

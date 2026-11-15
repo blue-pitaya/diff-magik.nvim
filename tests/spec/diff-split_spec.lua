@@ -5,6 +5,8 @@ local Git = require("diff-magik.git")
 
 local test = h.test
 
+local config = Config.new()
+
 ---@param before_open? fun()
 local function open_modified(before_open)
 	local root = h.repo({ ["a.lua"] = { "local a = 1", "return a" } })
@@ -64,11 +66,11 @@ end)
 test("close removes the HEAD pane and restores the main window options", function()
 	local root = h.repo({ ["a.lua"] = { "local a = 1", "return a" } })
 	h.write(root .. "/a.lua", { "local a = 2", "return a" })
-	local diff_split = DiffSplit.new(Config.new())
+	local diff_split = DiffSplit.new(config)
 	h.edit(root .. "/a.lua")
 	vim.wo.winhighlight = "Normal:Pmenu"
 	vim.wo.foldcolumn = "1"
-	diff_split:open_against_head(Git.from_root(root), "a.lua")
+	diff_split:open_against_head(Git.from_root(root, config), "a.lua")
 
 	diff_split:close()
 

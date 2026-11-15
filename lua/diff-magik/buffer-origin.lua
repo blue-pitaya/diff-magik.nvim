@@ -26,9 +26,10 @@ end
 
 ---The buffer's tag when it has one, otherwise the repo and path of the file it shows.
 ---@param bufnr integer
+---@param config Config
 ---@return BufferOrigin origin
 ---@return string? err
-function BufferOrigin.of(bufnr)
+function BufferOrigin.of(bufnr, config)
 	local tagged = from_tag(bufnr)
 	if tagged then
 		return tagged, nil
@@ -39,7 +40,7 @@ function BufferOrigin.of(bufnr)
 		return util.fail("current buffer has no file")
 	end
 
-	local repo, err = Git.new(vim.fs.dirname(path))
+	local repo, err = Git.new(vim.fs.dirname(path), config)
 	if err ~= nil then
 		return util.fail(err)
 	end

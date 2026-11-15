@@ -1,7 +1,10 @@
 local h = require("helpers")
+local Config = require("diff-magik.config")
 local Git = require("diff-magik.git")
 
 local test = h.test
+
+local config = Config.new()
 
 local function modified_repo()
 	local root = h.repo({ ["a.txt"] = { "one" } })
@@ -18,7 +21,7 @@ test("the stage key stages the file of the current buffer", function()
 
 	h.eq(
 		{ { path = "a.txt", status = "M", staged = true, unstaged = false } },
-		Git.from_root(root):get_changed_files()
+		Git.from_root(root, config):get_changed_files()
 	)
 end)
 
@@ -32,6 +35,6 @@ test("the stage key stages the file shown in the HEAD pane", function()
 
 	h.eq(
 		{ { path = "a.txt", status = "M", staged = true, unstaged = false } },
-		Git.from_root(root):get_changed_files()
+		Git.from_root(root, config):get_changed_files()
 	)
 end)

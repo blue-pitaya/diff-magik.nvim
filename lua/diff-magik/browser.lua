@@ -241,7 +241,7 @@ function Browser:open()
 	local bufname = vim.api.nvim_buf_get_name(0)
 	local dir = bufname ~= "" and vim.fs.dirname(bufname) or vim.fn.getcwd()
 
-	local repo, err = Git.new(dir)
+	local repo, err = Git.new(dir, self.config)
 	if err ~= nil then
 		util.error(err)
 		return

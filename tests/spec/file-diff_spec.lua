@@ -5,6 +5,8 @@ local FileDiffManager = require("diff-magik.file-diff-manager")
 
 local test = h.test
 
+local config = Config.new()
+
 local ns = vim.api.nvim_create_namespace("diff-magik.file-diff")
 local ADDED = "DiffMagikFileAdded"
 local DELETED = "DiffMagikFileDeleted"
@@ -27,13 +29,13 @@ local function attach(original, changed, before_attach)
 	local root = h.repo({ ["a.txt"] = original })
 	h.write(root .. "/a.txt", changed)
 
-	local file_diffs = FileDiffManager.new(Config.new())
+	local file_diffs = FileDiffManager.new(config)
 	h.edit(root .. "/a.txt")
 	if before_attach then
 		before_attach()
 	end
 	local source = vim.api.nvim_get_current_buf()
-	local view, err = file_diffs:attach(Git.from_root(root), "a.txt", source)
+	local view, err = file_diffs:attach(Git.from_root(root, config), "a.txt", source)
 	assert(err == nil, err)
 
 	return view, source, file_diffs

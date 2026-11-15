@@ -3,6 +3,7 @@ local util = require("diff-magik.util")
 
 ---@class Git
 ---@field root string
+---@field git CommandRunner runs git in root
 ---@field has_head? boolean
 ---@field empty_tree? string
 local Git = {}
@@ -11,41 +12,42 @@ Git.__index = Git
 local EMPTY_TREE_SHA1 = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
 ---@param path string
+---@param config Config
 ---@return Git repo
 ---@return string? err
-function Git.new(path)
+function Git.new(path, config)
 	local repo_root_path = util.nearest_existing_parent_dir(path)
 	if repo_root_path == nil then
 		return util.fail(("no existing directory in '%s'"):format(path))
 	end
 
-	local lines, err = CommandRunner.run({ "git", "-C", repo_root_path, "rev-parse", "--show-toplevel" })
+	local git = CommandRunner.new({ "git", "-C", repo_root_path }, config)
+	local lines, err = git:run({ "rev-parse", "--show-toplevel" })
 	if err ~= nil then
 		return util.fail(err)
 	end
-	return Git.from_root(lines[1]), nil
+	return Git.from_root(lines[1], config), nil
 end
 
 ---@param root string
+---@param config Config
 ---@return Git
-function Git.from_root(root)
-	return setmetatable({ root = root }, Git)
+function Git.from_root(root, config)
+	return setmetatable({ root = root, git = CommandRunner.new({ "git", "-C", root }, config) }, Git)
 end
 
 ---@return string
 function Git:base()
 	if self.has_head == nil then
-		self.has_head = CommandRunner.run({ "git", "-C", self.root, "rev-parse", "--verify", "--quiet", "HEAD" }) ~= nil
+		local _, err = self.git:run({ "rev-parse", "--verify", "--quiet", "HEAD" })
+		self.has_head = err == nil
 	end
 	if self.has_head then
 		return "HEAD"
 	end
 
 	if not self.empty_tree then
-		local lines, err = CommandRunner.run(
-			{ "git", "-C", self.root, "hash-object", "-t", "tree", "--stdin" },
-			{ stdin = "" }
-		)
+		local lines, err = self.git:run({ "hash-object", "-t", "tree", "--stdin" }, { stdin = "" })
 		self.empty_tree = err == nil and lines[1] or EMPTY_TREE_SHA1
 	end
 	return self.empty_tree
@@ -66,7 +68,7 @@ end
 ---@return boolean matches true when the working tree file equals the base version
 ---@return string? err
 function Git:matches_base(rel)
-	local lines, err = CommandRunner.run({ "git", "-C", self.root, "diff", "--name-only", self:base(), "--", rel })
+	local lines, err = self.git:run({ "diff", "--name-only", self:base(), "--", rel })
 	if err ~= nil then
 		return util.fail(err)
 	end
@@ -77,7 +79,7 @@ end
 ---@return boolean ok
 ---@return string? err
 function Git:stage(rel)
-	local _, err = CommandRunner.run({ "git", "-C", self.root, "add", "--", rel })
+	local _, err = self.git:run({ "add", "--", rel })
 	if err ~= nil then
 		return util.fail(err)
 	end
@@ -90,9 +92,9 @@ end
 function Git:unstage(rel)
 	local _, err
 	if self:base() ~= "HEAD" then
-		_, err = CommandRunner.run({ "git", "-C", self.root, "rm", "--cached", "--quiet", "--force", "--", rel })
+		_, err = self.git:run({ "rm", "--cached", "--quiet", "--force", "--", rel })
 	else
-		_, err = CommandRunner.run({ "git", "-C", self.root, "restore", "--staged", "--", rel })
+		_, err = self.git:run({ "restore", "--staged", "--", rel })
 	end
 	if err ~= nil then
 		return util.fail(err)
@@ -128,7 +130,7 @@ function Git:reset(rel)
 
 	local _
 	if entry.status ~= "A" then
-		_, err = CommandRunner.run({ "git", "-C", self.root, "checkout", self:base(), "--", rel })
+		_, err = self.git:run({ "checkout", self:base(), "--", rel })
 		if err ~= nil then
 			return util.fail(err)
 		end
@@ -157,14 +159,14 @@ end
 ---@return string[] lines
 ---@return string? err
 function Git:head_lines(rel)
-	return CommandRunner.run({ "git", "-C", self.root, "show", ("%s:%s"):format(self:base(), rel) })
+	return self.git:run({ "show", ("%s:%s"):format(self:base(), rel) })
 end
 
 ---@param rel string
 ---@return string[] lines
 ---@return string? err
 function Git:index_lines(rel)
-	return CommandRunner.run({ "git", "-C", self.root, "show", (":%s"):format(rel) })
+	return self.git:run({ "show", (":%s"):format(rel) })
 end
 
 ---@class GitBase
@@ -234,9 +236,6 @@ end
 ---@return string? err
 function Git:get_changed_files(pathspec)
 	local args = {
-		"git",
-		"-C",
-		self.root,
 		"status",
 		"--porcelain",
 		"-z",
@@ -249,7 +248,7 @@ function Git:get_changed_files(pathspec)
 		vim.list_extend(args, pathspec)
 	end
 
-	local records, err = CommandRunner.run(args, { sep = "\0" })
+	local records, err = self.git:run(args, { sep = "\0" })
 	if err ~= nil then
 		return util.fail(err)
 	end
