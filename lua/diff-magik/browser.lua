@@ -3,9 +3,9 @@ local TreeNode = require("diff-magik.tree")
 local Layout = require("diff-magik.layout")
 local render = require("diff-magik.render")
 local util = require("diff-magik.util")
-local config = require("diff-magik.config")
 
 ---@class BrowserState
+---@field config Config set by setup
 ---@field repo? Git
 ---@field tree? TreeNode
 ---@field flat? TreeFlatItem[]
@@ -69,7 +69,7 @@ local DIFF_ACTIONS = { "next_file", "prev_file" }
 local function set_keymaps(bufnr, names)
 	for _, name in ipairs(names) do
 		local action = ACTIONS[name]
-		for _, key in ipairs(config.options.keys[name]) do
+		for _, key in ipairs(state.config.keys[name]) do
 			vim.keymap.set("n", key, action.run, {
 				buffer = bufnr,
 				nowait = true,
@@ -84,7 +84,7 @@ end
 ---@param names string[]
 local function del_keymaps(bufnr, names)
 	for _, name in ipairs(names) do
-		for _, key in ipairs(config.options.keys[name]) do
+		for _, key in ipairs(state.config.keys[name]) do
 			pcall(vim.keymap.del, "n", key, { buffer = bufnr })
 		end
 	end
@@ -100,7 +100,7 @@ local function render_tree()
 	state.tree:flatten(0, flat)
 	state.flat = flat
 
-	Layout.fit_sidebar(render(buf, flat))
+	Layout.fit_sidebar(render(buf, flat, state.config.highlights))
 end
 
 ---@param path string?
@@ -296,7 +296,10 @@ local function close_split_view()
 	Layout.close_split_view()
 end
 
-function M.setup()
+---@param config Config
+function M.setup(config)
+	state.config = config
+
 	local augroup = vim.api.nvim_create_augroup("diff-magik.browser", { clear = true })
 
 	vim.api.nvim_create_autocmd("WinClosed", {

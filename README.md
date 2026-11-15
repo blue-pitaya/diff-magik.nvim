@@ -14,7 +14,6 @@ require("diff-magik").setup()
 - `:DiffMagikOpen` 
 - `:DiffMagikBrowser`
 - `:DiffMagikBrowserDiffToggle`
-- `:DiffMagikBrowserSizeToggle`
 
 # Known issues
 

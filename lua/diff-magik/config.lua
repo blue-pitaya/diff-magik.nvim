@@ -27,16 +27,18 @@
 ---| "split" # the working copy and the base side by side, in two panes
 ---| "inline" # one pane, with the deleted lines drawn above the added ones
 
----@class DiffMagikConfig
+---Plugin options: the user's settings merged over the defaults.
+---@class Config
 ---@field keys DiffMagikKeys
 ---@field highlights DiffMagikHighlights
 ---@field fillchar string 'fillchars' diff filler, drawn over missing lines
 ---@field width_mode DiffMagikWidthMode the sidebar starts in this mode
 ---@field diff_style DiffMagikDiffStyle the browser starts in this style
 ---@field fold_context integer untouched lines kept around each hunk before the browser folds the rest
+local Config = {}
+Config.__index = Config
 
----@type DiffMagikConfig
-local defaults = {
+local DEFAULTS = {
 	keys = {
 		open = { "<CR>", "o" },
 		close = { "q" },
@@ -64,24 +66,20 @@ local defaults = {
 	fold_context = 3,
 }
 
-local M = {}
-
----@type DiffMagikConfig
-M.options = vim.deepcopy(defaults)
-
----@param opts? table
-function M.setup(opts)
+---@param opts table?
+---@return Config
+function Config.new(opts)
 	opts = opts or {}
+	local defaults = vim.deepcopy(DEFAULTS)
 
-	local options = vim.deepcopy(defaults)
-	options.keys = vim.tbl_extend("force", options.keys, opts.keys or {})
-	options.highlights = vim.tbl_extend("force", options.highlights, opts.highlights or {})
-	options.fillchar = opts.fillchar or options.fillchar
-	options.width_mode = opts.width_mode or options.width_mode
-	options.diff_style = opts.diff_style or options.diff_style
-	options.fold_context = opts.fold_context or options.fold_context
-
-	M.options = options
+	return setmetatable({
+		keys = vim.tbl_extend("force", defaults.keys, opts.keys or {}),
+		highlights = vim.tbl_extend("force", defaults.highlights, opts.highlights or {}),
+		fillchar = opts.fillchar or defaults.fillchar,
+		width_mode = opts.width_mode or defaults.width_mode,
+		diff_style = opts.diff_style or defaults.diff_style,
+		fold_context = opts.fold_context or defaults.fold_context,
+	}, Config)
 end
 
-return M
+return Config

@@ -5,43 +5,38 @@ local FileDiff = require("diff-magik.file-diff")
 local Layout = require("diff-magik.layout")
 local Browser = require("diff-magik.browser")
 local util = require("diff-magik.util")
-local config = require("diff-magik.config")
+local Config = require("diff-magik.config")
 
 local M = {}
 
----@return BufferOrigin?
-local function current_file()
-	local origin, err = BufferOrigin.of(vim.api.nvim_get_current_buf())
-	if err ~= nil then
-		util.error(err)
-	end
-	return origin
-end
-
 ---@param opts? table
 function M.setup(opts)
-	config.setup(opts)
+	local config = Config.new(opts)
 
-	DiffSplit.setup()
-	FileDiff.setup()
-	Layout.setup()
-	Browser.setup()
+	DiffSplit.setup(config)
+	FileDiff.setup(config)
+	Layout.setup(config)
+	Browser.setup(config)
 
 	vim.api.nvim_create_user_command("DiffMagikOpen", function()
-		local origin = current_file()
-		if origin then
-			DiffSplit.open_against_head(Git.from_root(origin.root), origin.rel)
+		local origin, err = BufferOrigin.of(vim.api.nvim_get_current_buf())
+		if err ~= nil then
+			util.error(err)
+			return
 		end
+		DiffSplit.open_against_head(Git.from_root(origin.root), origin.rel)
 	end, {
 		desc = "Diff the current buffer's file against git HEAD",
 	})
 
-	for _, key in ipairs(config.options.keys.stage) do
+	for _, key in ipairs(config.keys.stage) do
 		vim.keymap.set("n", key, function()
-			local origin = current_file()
-			if origin then
-				Browser.toggle_stage(Git.from_root(origin.root), origin.rel)
+			local origin, err = BufferOrigin.of(vim.api.nvim_get_current_buf())
+			if err ~= nil then
+				util.error(err)
+				return
 			end
+			Browser.toggle_stage(Git.from_root(origin.root), origin.rel)
 		end, { desc = "DiffMagik: stage or unstage the current file" })
 	end
 
@@ -55,12 +50,6 @@ function M.setup(opts)
 		Browser.toggle_diff_style()
 	end, {
 		desc = "Switch the browser between the two-pane and single-pane diff styles",
-	})
-
-	vim.api.nvim_create_user_command("DiffMagikBrowserSizeToggle", function()
-		Browser.toggle_width_mode()
-	end, {
-		desc = "Switch the browser sidebar between the expanding and constant widths",
 	})
 end
 

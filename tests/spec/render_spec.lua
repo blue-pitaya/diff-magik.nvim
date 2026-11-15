@@ -1,5 +1,6 @@
 local h = require("helpers")
 local TreeNode = require("diff-magik.tree")
+local Config = require("diff-magik.config")
 local render = require("diff-magik.render")
 
 local test = h.test
@@ -18,7 +19,7 @@ local function rendered()
 	tree:flatten(0, flat)
 
 	local buf = vim.api.nvim_create_buf(false, true)
-	local width = render(buf, flat)
+	local width = render(buf, flat, Config.new().highlights)
 	return buf, width
 end
 

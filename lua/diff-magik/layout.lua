@@ -1,7 +1,6 @@
 local DiffSplit = require("diff-magik.diff-split")
 local FileDiff = require("diff-magik.file-diff")
 local util = require("diff-magik.util")
-local config = require("diff-magik.config")
 
 local SIDEBAR_MIN_WIDTH = 40
 local SIDEBAR_MAX_WIDTH = 50
@@ -35,9 +34,10 @@ local state = {
 
 local M = {}
 
-function M.setup()
-	state.width_mode = config.options.width_mode
-	state.diff_style = config.options.diff_style
+---@param config Config
+function M.setup(config)
+	state.width_mode = config.width_mode
+	state.diff_style = config.diff_style
 end
 
 ---@return integer?

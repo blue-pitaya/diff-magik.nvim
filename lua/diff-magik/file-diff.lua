@@ -1,4 +1,3 @@
-local config = require("diff-magik.config")
 local util = require("diff-magik.util")
 local BufferOrigin = require("diff-magik.buffer-origin")
 
@@ -26,8 +25,13 @@ local FOLD_OPT_NAMES = vim.tbl_keys(FOLD_OPTS)
 ---@field base string base version as text, for vim.text.diff
 ---@field base_lines string[] base version as lines
 ---@field keep? table<integer, boolean> view lines left unfolded; nil when nothing changed
+---@field config Config
 local FileDiff = {}
 FileDiff.__index = FileDiff
+
+---Set by setup; handed to every diff attach creates.
+---@type Config
+local config
 
 ---Diffs by view buffer.
 ---@type table<integer, FileDiff>
@@ -55,13 +59,13 @@ end
 
 ---@param ranges integer[][]
 ---@param total integer
+---@param context integer untouched lines kept around each range
 ---@return table<integer, boolean>?
-local function unfolded_lines(ranges, total)
+local function unfolded_lines(ranges, total, context)
 	if #ranges == 0 then
 		return nil
 	end
 
-	local context = config.options.fold_context
 	local keep = {}
 
 	for _, range in ipairs(ranges) do
@@ -97,13 +101,15 @@ end
 ---@param view integer
 ---@param source integer
 ---@param base_lines string[]
+---@param diff_config Config
 ---@return FileDiff
-function FileDiff.new(view, source, base_lines)
+function FileDiff.new(view, source, base_lines, diff_config)
 	return setmetatable({
 		view = view,
 		source = source,
 		base = as_text(base_lines),
 		base_lines = base_lines,
+		config = diff_config,
 	}, FileDiff)
 end
 
@@ -155,7 +161,7 @@ function FileDiff:render()
 	local current = vim.api.nvim_buf_get_lines(self.source, 0, -1, false)
 	local hunks = vim.text.diff(self.base, as_text(current), { result_type = "indices" }) --[[@as integer[][] ]]
 
-	local hl = config.options.highlights
+	local hl = self.config.highlights
 	local lines = {}
 	local groups = {}
 	local ranges = {}
@@ -187,7 +193,7 @@ function FileDiff:render()
 		table.insert(lines, current[lnum])
 	end
 
-	self.keep = unfolded_lines(ranges, #lines)
+	self.keep = unfolded_lines(ranges, #lines, self.config.fold_context)
 
 	vim.bo[self.view].modifiable = true
 	vim.api.nvim_buf_set_lines(self.view, 0, -1, false, lines)
@@ -241,7 +247,10 @@ function FileDiff.clear()
 	end
 end
 
-function FileDiff.setup()
+---@param plugin_config Config
+function FileDiff.setup(plugin_config)
+	config = plugin_config
+
 	local augroup = vim.api.nvim_create_augroup("diff-magik.file-diff", { clear = true })
 
 	define_hl()
@@ -313,7 +322,7 @@ function FileDiff.attach(repo, rel, bufnr)
 		BufferOrigin.new(repo.root, rel):tag(view)
 	end
 
-	local diff = FileDiff.new(view, bufnr, base.lines)
+	local diff = FileDiff.new(view, bufnr, base.lines, config)
 	active[view] = diff
 
 	vim.api.nvim_win_set_buf(0, view)

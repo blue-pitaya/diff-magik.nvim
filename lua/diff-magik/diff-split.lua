@@ -1,10 +1,10 @@
-local config = require("diff-magik.config")
 local util = require("diff-magik.util")
 local BufferOrigin = require("diff-magik.buffer-origin")
 
 local MAIN_OPTS = { "fillchars", "winhighlight", "foldcolumn" }
 
 ---@class DiffSplitState
+---@field config Config set by setup
 ---@field head_win? integer
 ---@field main_win? integer
 ---@field main_buf? integer
@@ -28,7 +28,8 @@ end
 
 ---@param winid integer
 ---@param winhighlight string
-local function diff_on(winid, winhighlight)
+---@param fillchar string
+local function diff_on(winid, winhighlight, fillchar)
 	if vim.wo[winid].diff and vim.wo[winid].foldmethod == "diff" then
 		return
 	end
@@ -36,7 +37,7 @@ local function diff_on(winid, winhighlight)
 	local wrap = vim.wo[winid].wrap
 
 	util.set_wo(winid, {
-		fillchars = diff_fillchars(winid, config.options.fillchar),
+		fillchars = diff_fillchars(winid, fillchar),
 		winhighlight = winhighlight,
 	})
 	vim.api.nvim_win_call(winid, function()
@@ -108,8 +109,9 @@ local function sync()
 	end
 
 	if showing_main_buf() then
-		diff_on(state.main_win, config.options.highlights.main_win)
-		diff_on(state.head_win, config.options.highlights.head_win)
+		local config = state.config
+		diff_on(state.main_win, config.highlights.main_win, config.fillchar)
+		diff_on(state.head_win, config.highlights.head_win, config.fillchar)
 	else
 		diff_off(state.main_win)
 		restore_main_opts()
@@ -117,7 +119,10 @@ local function sync()
 	end
 end
 
-function M.setup()
+---@param config Config
+function M.setup(config)
+	state.config = config
+
 	local augroup = vim.api.nvim_create_augroup("diff-magik.diff-split", { clear = true })
 
 	vim.api.nvim_create_autocmd({ "BufEnter", "BufWinEnter" }, {

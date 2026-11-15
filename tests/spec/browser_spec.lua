@@ -257,7 +257,7 @@ test("the sidebar uses the keys from the config", function()
 	h.eq({ root .. "/a.txt", "diffmagik://a.txt@HEAD", SIDEBAR }, h.win_names())
 end)
 
-test("DiffMagikBrowserSizeToggle switches between the fitted and the constant width", function()
+test("the toggle_width key switches between the fitted and the constant width", function()
 	local name = ("x"):rep(56) .. ".txt"
 	local root = h.repo({ ["a.txt"] = { "a" } })
 	h.write(vim.fs.joinpath(root, name), { "new" })
@@ -269,6 +269,7 @@ test("DiffMagikBrowserSizeToggle switches between the fitted and the constant wi
 
 	h.eq(50, vim.api.nvim_win_get_width(win))
 
-	vim.cmd.DiffMagikBrowserSizeToggle()
+	vim.api.nvim_set_current_win(win)
+	h.press("N")
 	h.eq(40, vim.api.nvim_win_get_width(win))
 end)

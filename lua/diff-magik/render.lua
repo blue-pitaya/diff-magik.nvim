@@ -1,10 +1,8 @@
-local config = require("diff-magik.config")
-
 local ns = vim.api.nvim_create_namespace("diff-magik")
 
 ---@param status string
-local function status_hl(status)
-	local hl = config.options.highlights
+---@param hl DiffMagikHighlights
+local function status_hl(status, hl)
 	if status == "A" then
 		return hl.added
 	elseif status == "D" then
@@ -32,8 +30,8 @@ local function stage_suffix(entry)
 end
 
 ---@param entry GitEntry
-local function stage_hl(entry)
-	local hl = config.options.highlights
+---@param hl DiffMagikHighlights
+local function stage_hl(entry, hl)
 	return entry.unstaged and hl.staged_dirty or hl.staged
 end
 
@@ -64,18 +62,19 @@ end
 ---@param buf integer
 ---@param flat TreeFlatItem[]
 ---@param lines string[]
-local function apply_highlights(buf, flat, lines)
+---@param hl DiffMagikHighlights
+local function apply_highlights(buf, flat, lines, hl)
 	vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
 	for i, item in ipairs(flat) do
 		if item.node.is_dir then
 			vim.api.nvim_buf_set_extmark(buf, ns, i - 1, 0, {
-				line_hl_group = config.options.highlights.directory,
+				line_hl_group = hl.directory,
 			})
 		else
 			local col = #("  "):rep(item.depth)
 			vim.api.nvim_buf_set_extmark(buf, ns, i - 1, col, {
 				end_col = col + 1,
-				hl_group = status_hl(item.node.entry.status),
+				hl_group = status_hl(item.node.entry.status, hl),
 			})
 
 			local suffix = stage_suffix(item.node.entry)
@@ -83,7 +82,7 @@ local function apply_highlights(buf, flat, lines)
 				local end_col = #lines[i]
 				vim.api.nvim_buf_set_extmark(buf, ns, i - 1, end_col - #suffix + 1, {
 					end_col = end_col,
-					hl_group = stage_hl(item.node.entry),
+					hl_group = stage_hl(item.node.entry, hl),
 				})
 			end
 		end
@@ -92,15 +91,16 @@ end
 
 ---@param buf integer
 ---@param flat TreeFlatItem[]
+---@param hl DiffMagikHighlights
 ---@return integer
-local function render(buf, flat)
+local function render(buf, flat, hl)
 	local lines, widest = build_lines(flat)
 
 	vim.bo[buf].modifiable = true
 	vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
 	vim.bo[buf].modifiable = false
 
-	apply_highlights(buf, flat, lines)
+	apply_highlights(buf, flat, lines, hl)
 
 	return widest
 end
