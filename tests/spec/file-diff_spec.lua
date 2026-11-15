@@ -32,9 +32,10 @@ local function attach(original, changed, before_attach)
 		before_attach()
 	end
 	local source = vim.api.nvim_get_current_buf()
-	local view = FileDiff.attach(Git.from_root(root), "a.txt", source)
+	local view, err = FileDiff.attach(Git.from_root(root), "a.txt", source)
+	assert(err == nil, err)
 
-	return assert(view), source
+	return view, source
 end
 
 ---@param before_attach? fun()

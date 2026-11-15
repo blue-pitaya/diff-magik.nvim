@@ -191,7 +191,13 @@ function M.open_file(repo, rel)
 	local bufnr = vim.api.nvim_win_get_buf(main_win)
 
 	if state.diff_style == "inline" then
-		return { FileDiff.attach(repo, rel, bufnr) or bufnr }
+		local view
+		view, err = FileDiff.attach(repo, rel, bufnr)
+		if err ~= nil then
+			util.error(err)
+			return { bufnr }
+		end
+		return { view }
 	end
 
 	FileDiff.detach(bufnr)
@@ -205,7 +211,7 @@ function M.reload_main()
 		return
 	end
 
-	local source = FileDiff.source(vim.api.nvim_win_get_buf(state.main_win))
+	local source = FileDiff.source_of(vim.api.nvim_win_get_buf(state.main_win))
 	if source then
 		vim.api.nvim_buf_call(source, function()
 			pcall(vim.cmd.edit, { bang = true })
